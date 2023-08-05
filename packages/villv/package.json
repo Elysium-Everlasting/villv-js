@@ -2,6 +2,7 @@
   "name": "@villv-js/villv",
   "version": "0.1.0",
   "description": "Native-ESM powered web dev build tool",
+  "private": true,
   "license": "MIT",
   "homepage": "https://github.com/Elysium-Everlasting/villv-js",
   "funding": "https://github.com/Elysium-Everlasting/villv-js",
