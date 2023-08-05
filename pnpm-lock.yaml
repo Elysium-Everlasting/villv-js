@@ -83,6 +83,8 @@ importers:
         specifier: 1.0.0-beta.7
         version: 1.0.0-beta.7(@algolia/client-search@4.19.1)(@types/node@20.4.5)(search-insights@2.7.0)
 
+  packages/villv: {}
+
 packages:
   /@aashutoshrathi/word-wrap@1.2.6:
     resolution:
