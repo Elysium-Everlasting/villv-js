@@ -33,7 +33,11 @@
   "bin": {},
   "exports": {},
   "files": [],
-  "scripts": {},
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsup",
+    "start": "node dist/index.js"
+  },
   "publishConfig": {
     "access": "public"
   },
@@ -43,7 +47,16 @@
     "node": ">=18"
   },
   "dependencies": {
+    "cheerio": "1.0.0-rc.12",
     "chokidar": "^3.5.3",
-    "fast-glob": "^3.3.1"
+    "esbuild": "^0.18.18",
+    "fast-glob": "^3.3.1",
+    "htmlparser2": "^9.0.0",
+    "ws": "^8.13.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.5",
+    "tsup": "^7.2.0",
+    "tsx": "^3.12.7"
   }
 }
