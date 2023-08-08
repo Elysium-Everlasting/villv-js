@@ -41,5 +41,9 @@
   "engines": {
     "pnpm": "^8.0.0",
     "node": ">=18"
+  },
+  "dependencies": {
+    "picocolors": "^1.0.0",
+    "rollup": "^3.27.2"
   }
 }
