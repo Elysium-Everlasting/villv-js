@@ -1,13 +1,18 @@
 import os from 'node:os'
 import fs from 'node:fs'
 import path from 'node:path'
+import crypto from 'node:crypto'
+import { promises as dns } from 'node:dns'
 import { exec } from 'node:child_process'
 import { builtinModules, createRequire } from 'node:module'
 import picocolors from 'picocolors'
 import debug from 'debug'
-import type { BuildOptions } from 'esbuild'
 import type { FSWatcher } from 'chokidar'
+import type MagicString from 'magic-string'
+import type { BuildOptions } from 'esbuild'
+import type { TransformResult } from 'rollup'
 import { createFilter, type FilterPattern } from '@rollup/pluginutils'
+import type { Alias } from '@rollup/plugin-alias'
 import {
   CLIENT_ENTRY,
   CLIENT_PUBLIC_PATH,
@@ -16,9 +21,25 @@ import {
   NULL_BYTE_PLACEHOLDER,
   OPTIMIZABLE_ENTRY_REGEX,
   VALID_ID_PREFIX,
+  wildcardHosts,
 } from './constants.js'
 import type { DecodedSourceMap, RawSourceMap } from '@ampproject/remapping'
 import remapping from '@ampproject/remapping'
+import type { ResolvedServerUrls } from './logger.js'
+
+/**
+ * Specifies an `Object`, or an `Array` of `Object`,
+ * which defines aliases used to replace values in `import` or `require` statements.
+ *
+ * With either format, the order of the entries is important,
+ * in that the first defined rules are applied first.
+ *
+ * This is passed to \@rollup/plugin-alias as the "entries" field
+ * @see https://github.com/rollup/plugins/tree/master/packages/alias#entries
+ *
+ * TODO: move this somewhere else.
+ */
+export type AliasOptions = readonly Alias[] | { [find: string]: string }
 
 /**
  * TODO: move this somewhere else too.
@@ -1083,4 +1104,414 @@ export function combineSourceMaps(
   map.sources = map.sources.map((source) => (source ? toUnixPath(source) : null))
 
   return map as RawSourceMap
+}
+
+/**
+ * Remove duplicated items from array
+ */
+export function unique<T>(array: T[]): T[] {
+  return Array.from(new Set(array))
+}
+
+/**
+ * Returns resolved localhost address when `dns.lookup` result differs from DNS
+ *
+ * `dns.lookup` result is same when defaultResultOrder is `verbatim`.
+ * Even if defaultResultOrder is `ipv4first`, `dns.lookup` result maybe same.
+ * For example, when IPv6 is not supported on that machine/network.
+ */
+
+export async function getLocalhostAddressIfDifferentFromDns(): Promise<string | undefined> {
+  const [nodeResult, dnsResult] = await Promise.all([
+    dns.lookup('localhost'),
+
+    /**
+     * It says `verbatim` is true by default, wouldn't this be the same as the above?
+     */
+    dns.lookup('localhost', { verbatim: true }),
+  ])
+
+  const isSame = nodeResult.address === dnsResult.address && nodeResult.family === dnsResult.family
+
+  return isSame ? undefined : nodeResult.address
+}
+
+export function diffDnsOrderChange(
+  // oldUrls: ViteDevServer['resolvedUrls'],
+  // newUrls: ViteDevServer['resolvedUrls'],
+  oldUrls: ResolvedServerUrls | null,
+  newUrls: ResolvedServerUrls | null,
+): boolean {
+  return !(
+    oldUrls === newUrls ||
+    (oldUrls &&
+      newUrls &&
+      arrayEqual(oldUrls.local, newUrls.local) &&
+      arrayEqual(oldUrls.network, newUrls.network))
+  )
+}
+
+export function arrayEqual(left: unknown[], right: unknown[]): boolean {
+  if (left.length !== right.length) {
+    return false
+  }
+  return left === right || left.every((item, index) => item === right[index])
+}
+
+export interface Hostname {
+  /**
+   * `undefined` sets the default behaviour of server.listen
+   */
+  host: string | undefined
+
+  /**
+   * Resolve to localhost when possible.
+   */
+  name: string
+}
+
+/**
+ * Secure default.
+ */
+const defaultHost = 'localhost'
+
+/**
+ * If passed --host in the CLI without arguments.
+ * `undefined` typically means 0.0.0.0 or :: (listen on all IPs)
+ */
+const listenAllHost = undefined
+
+export async function resolveHostname(optionsHost?: string | boolean): Promise<Hostname> {
+  const host = !optionsHost ? defaultHost : optionsHost === true ? listenAllHost : optionsHost
+
+  /**
+   * Set host name to localhost when possible
+   */
+  let name = host === undefined || wildcardHosts.has(host) ? 'localhost' : host
+
+  if (host === 'localhost') {
+    // See #8647 for more details.
+    const localhostAddr = await getLocalhostAddressIfDifferentFromDns()
+    if (localhostAddr) {
+      name = localhostAddr
+    }
+  }
+
+  return { host, name }
+}
+
+/**
+ * TODO
+ */
+export async function resolveServerUrls() {}
+
+export function toArray<T>(target: T | T[]): T[] {
+  return Array.isArray(target) ? target : [target]
+}
+
+// Taken from https://stackoverflow.com/a/36328890
+export const multilineCommentsRegex = /\/\*[^*]*\*+(?:[^/*][^*]*\*+)*\//g
+export const singlelineCommentsRegex = /\/\/.*/g
+export const requestQuerySplitRegex = /\?(?!.*[/|}])/
+
+// @ts-expect-error jest only exists when running Jest
+export const usingDynamicImport = typeof jest === 'undefined'
+
+/**
+ * Dynamically import files. It will make sure it's not being compiled away by TS/Rollup.
+ *
+ * As a temporary workaround for Jest's lack of stable ESM support, we fallback to require
+ * if we're in a Jest environment.
+ * See https://github.com/vitejs/vite/pull/5197#issuecomment-938054077
+ *
+ * @param file File path to import.
+ */
+export const dynamicImport = usingDynamicImport
+  ? new Function('file', 'return import(file)')
+  : _require
+
+export function parseRequest(id: string): Record<string, string> | null {
+  const [_, search] = id.split(requestQuerySplitRegex, 2)
+
+  if (!search) {
+    return null
+  }
+
+  return Object.fromEntries(new URLSearchParams(search))
+}
+
+export function getHash(text: Buffer | string): string {
+  return crypto.createHash('sha256').update(text).digest('hex').substring(0, 8)
+}
+
+export function emptyCssComments(raw: string): string {
+  return raw.replace(multilineCommentsRegex, (s) => ' '.repeat(s.length))
+}
+
+export function removeComments(raw: string): string {
+  return raw.replace(multilineCommentsRegex, '').replace(singlelineCommentsRegex, '')
+}
+
+export function mergeConfigRecursively<
+  Defaults extends Record<PropertyKey, any>,
+  Overrides extends Record<PropertyKey, any>,
+>(
+  defaults: Defaults extends Function ? never : Defaults,
+  overrides: Overrides extends Function ? never : Overrides,
+  rootPath: string,
+) {
+  const merged: Record<PropertyKey, any> = { ...defaults }
+
+  Object.entries(overrides).forEach(([key, value]) => {
+    if (value == null) {
+      return
+    }
+
+    const existing = merged[key]
+
+    if (existing == null) {
+      merged[key] == value
+      return
+    }
+
+    if (key === 'alias' && ['resolve', ''].includes(rootPath)) {
+      merged[key] = mergeAlias(existing, value)
+      return
+    }
+
+    if (key === 'assetsInclude' && rootPath === '') {
+      merged[key] = [].concat(existing, value)
+      return
+    }
+
+    if (key === 'noExternal' && rootPath === 'ssr' && (existing === true || value === true)) {
+      merged[key] = true
+      return
+    }
+
+    if (Array.isArray(existing) || Array.isArray(value)) {
+      merged[key] = [...toArray(existing ?? []), ...toArray(value ?? [])]
+      return
+    }
+
+    if (isObject(existing) && isObject(value)) {
+      merged[key] = mergeConfigRecursively(existing, value, rootPath ? `${rootPath}.${key}` : key)
+      return
+    }
+
+    merged[key] = value
+  })
+
+  return merged
+}
+
+export function mergeConfig<
+  Defaults extends Record<PropertyKey, any>,
+  Overrides extends Record<PropertyKey, any>,
+>(
+  defaults: Defaults extends Function ? never : Defaults,
+  overrides: Overrides extends Function ? never : Overrides,
+  isRoot = true,
+) {
+  if (typeof defaults === 'function' || typeof overrides === 'function') {
+    throw new Error(`Cannot merge config in form of callback`)
+  }
+  return mergeConfigRecursively(defaults, overrides, isRoot ? '' : '.')
+}
+
+export function mergeAlias(left?: AliasOptions, right?: AliasOptions): AliasOptions | undefined {
+  if (!left || !right) {
+    return left || right
+  }
+
+  if (isObject(left) && isObject(right)) {
+    return { ...left, ...right }
+  }
+
+  /**
+   * The order is flipped because the alias is resolved from top-down,
+   * where the later should have higher priority.
+   */
+  return [...normalizeAlias(right), ...normalizeAlias(left)]
+}
+
+/**
+ * Idk.
+ */
+export function normalizeAlias(options: AliasOptions = []): Alias[] {
+  return Array.isArray(options)
+    ? options.map(normalizeSingleAlias)
+    : Object.entries(options).map(([find, replacement]) =>
+        normalizeSingleAlias({ find, replacement }),
+      )
+}
+
+/**
+ * Work-around for {@link https://github.com/rollup/plugins/issues/759}
+ *
+ * @see https://github.com/vitejs/vite/issues/1363
+ */
+function normalizeSingleAlias(alias: Alias): Alias {
+  if (typeof alias.find !== 'string') {
+    return alias
+  }
+
+  const startsWithSlash = alias.find.at(-1) === '/' && alias.replacement.at(-1) === '/'
+
+  return {
+    ...alias,
+    find: startsWithSlash ? alias.find.slice(0, -1) : alias.find,
+    replacement: startsWithSlash ? alias.replacement.slice(0, -1) : alias.replacement,
+  }
+}
+
+/**
+ * Transforms transpiled code result where line numbers aren't altered,
+ * so we can skip sourcemap generation during dev.
+ *
+ * TODO
+ */
+export function transformStableResult(
+  string: MagicString,
+  id: string,
+  config: any,
+): TransformResult {}
+
+/**
+ * Flattens an array of (possible) promises.
+ */
+export async function asyncFlatten<T>(
+  initialArray: T[],
+): Promise<FlatArray<T[], typeof Infinity>[]> {
+  let flattenedArray: typeof initialArray
+
+  do {
+    flattenedArray = await Promise.all(initialArray).then((array) => array.flat(Infinity) as any)
+  } while (flattenedArray.some((item: any) => item?.then))
+
+  return flattenedArray
+}
+
+/**
+ * Strips UTF-8 BOM.
+ *
+ * [Byte Order Mark](https://en.wikipedia.org/wiki/Byte_order_mark#UTF-8).
+ */
+export function stripBomTag(content: string) {
+  return content.charCodeAt(0) === 0xfeff ? content.slice(1) : content
+}
+
+const windowsDrivePathPrefixRegex = /^[A-Za-z]:[/\\]/
+
+/**
+ * {@link path.isAbsolute} also returns true for drive relative paths on windows (e.g. /something)
+ *
+ * This function returns false for them but true for absolute paths (e.g. C:/something)
+ */
+export const isNonDriveRelativeAbsolutePath = (p: string): boolean => {
+  return isWindows ? p[0] === '/' : windowsDrivePathPrefixRegex.test(p)
+}
+
+/**
+ * Determine if a file is being requested with the correct case,
+ * to ensure consistent behaviour between dev and prod and across operating systems.
+ */
+export function shouldServeFile(file: string, root: string): boolean {
+  return isCaseInsensitiveFs ? true : hasCorrectCase(file, root)
+}
+
+/**
+ * Determines if a file has the correct casing.
+ *
+ * Note that we can't use realpath here, because we don't want to follow symlinks.
+ */
+export function hasCorrectCase(file: string, assets: string): boolean {
+  if (file === assets) {
+    return true
+  }
+
+  const parent = path.dirname(file)
+
+  if (fs.readdirSync(parent).includes(path.basename(file))) {
+    return hasCorrectCase(parent, assets)
+  }
+
+  return false
+}
+
+/**
+ * I feel that this can be accomplished more succinctly just with {@link path.relative}
+ */
+export function joinUrlSegments(left: string, right: string): string {
+  if (!left || !right) {
+    return left || right || ''
+  }
+
+  /**
+   * Remove the trailing slash from the left side and the leading slash from the right side.
+   */
+  const paddedLeft = left.at(-1) === '/' ? left.slice(0, -1) : left
+  const paddedRight = right[0] === '/' ? right : `/${right}`
+
+  return `${paddedLeft}${paddedRight}`
+}
+
+export function removeLeadingSlash(str: string): string {
+  return str[0] === '/' ? str.slice(1) : str
+}
+
+export function stripBase(path: string, base: string): string {
+  if (path === base) {
+    return '/'
+  }
+  const devBase = base.at(-1) === '/' ? base : `${base}/`
+  return path.startsWith(devBase) ? path.slice(devBase.length) : path
+}
+
+export function evalValue<T = any>(rawValue: string): T {
+  const fn = new Function(`
+    var console, exports, global, module, process, require
+    return (\n${rawValue}\n)
+  `)
+  return fn()
+}
+
+/**
+ * Returns the package name of an import path.
+ */
+export function getNpmPackageName(importPath: string): string | null | undefined {
+  const parts = importPath.split('/')
+
+  // Scoped packages. e.g. @villv.js/vite
+  if (parts[0]?.[0] === '@') {
+    return parts[1] == null ? null : `${parts[0]}/${parts[1]}`
+  } else {
+    return parts[0]
+  }
+}
+
+const escapeRegexRegex = /[-/\\^$*+?.()|[\]{}]/g
+
+export function escapeRegex(str: string): string {
+  return str.replace(escapeRegexRegex, '\\$&')
+}
+
+type CommandType = 'install' | 'uninstall' | 'update'
+
+export function getPackageManagerCommand(type: CommandType = 'install'): string {
+  const packageManager = process.env['npm_config_user_agent']?.split(' ')[0]?.split('/')[0] ?? 'npm'
+
+  switch (type) {
+    case 'install':
+      return packageManager === 'npm' ? 'npm install' : `${packageManager} add`
+
+    case 'uninstall':
+      return packageManager === 'npm' ? 'npm uninstall' : `${packageManager} remove`
+
+    case 'update':
+      return packageManager === 'yarn' ? 'yarn upgrade' : `${packageManager} update`
+
+    default:
+      throw new TypeError(`Unknown command type: ${type}`)
+  }
 }
