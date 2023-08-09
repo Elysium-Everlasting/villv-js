@@ -5,7 +5,7 @@
     "emitDecoratorMetadata": true,
 
     "module": "ESNext",
-    "moduleResolution": "NodeNext",
+    "moduleResolution": "bundler",
     "baseUrl": ".",
     "resolvePackageJsonExports": true,
     "resolvePackageJsonImports": true,

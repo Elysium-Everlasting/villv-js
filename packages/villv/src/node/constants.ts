@@ -79,7 +79,7 @@ export const SPECIAL_QUERY_REGEX = /[?&](?:worker|sharedworker|raw|url)\b/
  * Prefix used for request for JS files directly from the file system.
  * i.e. The server should respond with the file's content.
  */
-export const FS_PREFX = `/@fs/`
+export const FS_PREFIX = `/@fs/`
 
 /**
  * Prefix for resolved IDs that aren't valid browser import specifiers.
