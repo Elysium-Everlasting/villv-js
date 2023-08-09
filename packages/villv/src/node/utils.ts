@@ -1205,7 +1205,7 @@ export async function resolveHostname(optionsHost?: string | boolean): Promise<H
  */
 export async function resolveServerUrls() {}
 
-export function toArray<T>(target: T | T[]): T[] {
+export function toArray<T>(target: T | T[] = []): T[] {
   return Array.isArray(target) ? target : [target]
 }
 
