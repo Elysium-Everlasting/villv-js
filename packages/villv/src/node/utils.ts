@@ -1380,9 +1380,7 @@ export function transformStableResult(
 /**
  * Flattens an array of (possible) promises.
  */
-export async function asyncFlatten<T>(
-  initialArray: T[],
-): Promise<FlatArray<T[], typeof Infinity>[]> {
+export async function asyncFlatten<T>(initialArray: T[]): Promise<T[]> {
   let flattenedArray: typeof initialArray
 
   do {

@@ -1,9 +1,45 @@
-import type { RollupOptions, Plugin as RollupPlugin } from 'rollup'
-import type { BuildOptions as ESBuildOptions, LogLevel } from 'esbuild'
-import { ENV_PREFIX } from './constants.js'
-import type { Logger } from './logger.js'
+import fs from 'node:fs'
+import path from 'node:path'
+// import util from 'node:util'
+import type { ObjectHook, RollupOptions, Plugin as RollupPlugin } from 'rollup'
+import colors from 'picocolors'
+import type { BuildOptions as ESBuildOptions } from 'esbuild'
+import type { Alias } from '@rollup/plugin-alias'
+import {
+  CLIENT_ENTRY,
+  DEFAULT_ASSETS_REGEX,
+  DEFAULT_CONFIG_FILES,
+  DEFAULT_EXTENSIONS,
+  DEFAULT_MAIN_FIELDS,
+  ENV_ENTRY,
+  ENV_PREFIX,
+  FS_PREFIX,
+} from './constants.js'
+import { createLogger, type Logger, type LogLevel } from './logger.js'
+import {
+  asyncFlatten,
+  createDebugger,
+  isObject,
+  lookupFile,
+  mergeAlias,
+  mergeConfig,
+  normalizeAlias,
+  normalizePath,
+} from './utils.js'
+import { resolveEnvPrefix } from './env.js'
 
-export interface Plugin extends RollupPlugin {}
+const debug = createDebugger('vite:config')
+// const promisifiedRealpath = util.promisify(fs.realpath)
+
+/**
+ * TODO
+ */
+export interface Plugin extends RollupPlugin {
+  /**
+   * Apply the plugin only for serve or build, or on certain conditions.
+   */
+  apply?: ConfigCommand | ((this: void, config: UserConfig, env: ConfigEnv) => boolean)
+}
 
 export type UserConfig = {
   /**
@@ -25,7 +61,7 @@ export type UserConfig = {
   /**
    * Directory to serve as plain static assets.
    *
-   * Files in this directory are served and copied to build dist dir as-is without transform.
+   * Files in this directory are served and copied to build dist dir as-is without transformations.
    * The value can be either an absolute file system path or a path relative to project root.
    *
    * Set to `false` or an empty string to disable copied static assets to build dist dir.
@@ -205,9 +241,133 @@ export type UserConfig = {
   appType?: AppType
 }
 
-export type ResolvedConfig = {
-  cacheDirectory: string
+type Override<Left, Right> = Omit<Left, keyof Right> & Right
+
+type InternalConfig = {
+  configFile: string | undefined
+
+  configFileDependencies: string[]
+
+  inlineConfig: InlineConfig
+
+  root: string
+
+  base: string
+
+  /**
+   * @internal
+   */
+  rawBase: string
+
+  publicDir: string
+
+  cacheDir: string
+
+  command: 'build' | 'serve'
+
+  mode: string
+
+  isWorker: boolean
+
+  /**
+   * In nested worker bundle to find the main config.
+   * @internal
+   */
+  mainConfig: ResolvedConfig | null
+
+  isProduction: boolean
+
+  envDir: string
+
+  env: Record<string, any>
+
+  resolve: Required<ResolveOptions> & { alias: Alias[] }
+
+  plugins: readonly Plugin[]
+
+  /**
+   * TODO
+   */
+  css: any // ResolvedCSSOptions | undefined
+
+  esbuild: ESBuildOptions | false
+
+  /**
+   * TODO
+   */
+  server: any // ResolvedServerOptions
+
+  /**
+   * TODO
+   */
+  build: any // ResolvedBuildOptions
+
+  /**
+   * TODO
+   */
+  preview: any // ResolvedPreviewOptions
+
+  /**
+   * TODO
+   */
+  ssr: any // ResolvedSSROptions
+
+  assetsInclude: (file: string) => boolean
+
+  logger: Logger
+
+  /**
+   * TODO
+   */
+  createResolver: any // (options?: Partial<InternalResolveOptions>) => ResolveFn
+
+  /**
+   * TODO
+   */
+  optimizeDeps: any // DepOptimizationOptions
+
+  /**
+   * @internal
+   *
+   * TODO
+   */
+  packageCache: any // PackageCache
+
+  /**
+   * TODO
+   */
+  worker: any // ResolveWorkerOptions
+
+  appType: AppType
+
+  experimental: ExperimentalOptions
 }
+
+export type ResolvedConfig = Override<UserConfig, InternalConfig & PluginHookUtils>
+
+/**
+ */
+export interface InlineConfig extends UserConfig {
+  configFile?: string | false
+  envFile?: false
+}
+
+/**
+ * TODO
+ */
+export interface ResolveOptions {}
+
+/**
+ */
+export interface PluginHookUtils {
+  getSortedPlugins(hookName: keyof Plugin): Plugin[]
+  getSortedPluginHooks<K extends keyof Plugin>(hookName: K): NonNullable<HookHandler<Plugin[K]>>[]
+}
+
+/**
+ * TODO: move this somewhere else?
+ */
+export type HookHandler<T> = T extends ObjectHook<infer H> ? H : T
 
 /**
  * Environment that the config is being executed in.
@@ -291,4 +451,557 @@ export interface ExperimentalOptions {}
  */
 export function defineConfig<T extends UserConfigExport>(config: T): T {
   return config
+}
+
+/**
+ * TODO
+ */
+export interface PackageCache {}
+
+export async function resolveConfig(
+  inlineConfig: InlineConfig,
+  command: ConfigCommand,
+  defaultMode = 'development',
+  defaultNodeEnv = 'development',
+): Promise<ResolvedConfig> {
+  let config = inlineConfig
+  let configFileDependencies: string[] = []
+  let mode = inlineConfig.mode ?? defaultMode
+  const isNodeEnvSet = !!process.env['NODE_ENV']
+  const packageCache: PackageCache = new Map()
+
+  /**
+   * Some dependencies e.g. @vue/compiler-* relies on NODE_ENV
+   * for getting production-specific behavior, so set it early on.
+   */
+  if (!isNodeEnvSet) {
+    process.env['NODE_ENV'] = defaultNodeEnv
+  }
+
+  const configEnv = {
+    mode,
+    command,
+    ssrBuild: !!config.build?.ssr,
+  }
+
+  let { configFile } = config
+
+  if (configFile !== false) {
+    const loadResult = await loadConfigFromFile(configEnv, configFile, config.root, config.logLevel)
+    if (loadResult) {
+      config = mergeConfig(loadResult.config, config)
+      configFile = loadResult.path
+      configFileDependencies = loadResult.dependencies
+    }
+  }
+
+  /**
+   * User config may provide an alternative mode. But --mode has a higher priority.
+   */
+  configEnv.mode = inlineConfig.mode ?? config.mode ?? mode
+
+  const filterPlugin = (p: Plugin) => {
+    if (!p) {
+      return false
+    } else if (!p.apply) {
+      return true
+    } else if (typeof p.apply === 'function') {
+      return p.apply({ ...config, mode }, configEnv)
+    } else {
+      return p.apply === command
+    }
+  }
+
+  /**
+   * Some plugins that aren't intended to work in the bundling of workers (doing post-processing at build time for example).
+   * And Plugins may also have cached that could be corrupted by being used in these extra rollup calls.
+   * So we need to separate the worker plugin from the plugin that vite needs to run.
+   */
+  const rawWorkerUserPlugins = await asyncFlatten(config.worker?.plugins || []).then((plugins) =>
+    (plugins as Plugin[]).filter(filterPlugin),
+  )
+
+  /**
+   * Resolve plugins.
+   */
+  const rawUserPlugins = await asyncFlatten(config.plugins || []).then((plugins) =>
+    (plugins as Plugin[]).filter(filterPlugin),
+  )
+
+  const [prePlugins, normalPlugins, postPlugins] = sortUserPlugins(rawUserPlugins)
+
+  // run config hooks
+  const userPlugins = [...prePlugins, ...normalPlugins, ...postPlugins]
+
+  config = await runConfigHook(config, userPlugins, configEnv)
+
+  /**
+   * If there are custom commonjsOptions, don't force optimized deps for this test ---
+   * even if the env var is set as it would interfere with the playground specs.
+   */
+  if (!config.build?.commonjsOptions && process.env['VITE_TEST_WITHOUT_PLUGIN_COMMONJS']) {
+    config = mergeConfig(config, {
+      optimizeDeps: { disabled: false },
+      ssr: { optimizeDeps: { disabled: false } },
+    })
+    config.build ??= {}
+    config.build.commonjsOptions = { include: [] }
+  }
+
+  /**
+   * Define logger.
+   */
+  const logger = createLogger(config.logLevel, {
+    allowClearScreen: config.clearScreen,
+    customLogger: config.customLogger,
+  })
+
+  /**
+   * Resolve root.
+   */
+  const resolvedRoot = normalizePath(config.root ? path.resolve(config.root) : process.cwd())
+
+  const clientAlias = [
+    {
+      find: /^\/?@vite\/env/,
+      replacement: path.posix.join(FS_PREFIX, normalizePath(ENV_ENTRY)),
+    },
+    {
+      find: /^\/?@vite\/client/,
+      replacement: path.posix.join(FS_PREFIX, normalizePath(CLIENT_ENTRY)),
+    },
+  ]
+
+  // resolve alias with internal client alias
+  const resolvedAlias = normalizeAlias(mergeAlias(clientAlias, config.resolve?.alias || []))
+
+  const resolveOptions: ResolvedConfig['resolve'] = {
+    mainFields: config.resolve?.mainFields ?? DEFAULT_MAIN_FIELDS,
+    browserField: config.resolve?.browserField ?? true,
+    conditions: config.resolve?.conditions ?? [],
+    extensions: config.resolve?.extensions ?? DEFAULT_EXTENSIONS,
+    dedupe: config.resolve?.dedupe ?? [],
+    preserveSymlinks: config.resolve?.preserveSymlinks ?? false,
+    alias: resolvedAlias,
+  }
+
+  /**
+   * Load .env files.
+   */
+  const envDir = config.envDirectory
+    ? normalizePath(path.resolve(resolvedRoot, config.envDirectory))
+    : resolvedRoot
+
+  const userEnv = inlineConfig.envFile !== false && loadEnv(mode, envDir, resolveEnvPrefix(config))
+
+  /**
+   * Note it is possible for user to have a custom mode,
+   *
+   * e.g. `staging` where development-like behavior is expected.
+   *
+   * This is indicated by NODE_ENV=development loaded from `.staging.env` and set by us as VITE_USER_NODE_ENV
+   */
+  const userNodeEnv = process.env['VITE_USER_NODE_ENV']
+
+  if (!isNodeEnvSet && userNodeEnv) {
+    if (userNodeEnv === 'development') {
+      process.env['NODE_ENV'] = 'development'
+    } else {
+      /**
+       * NODE_ENV=production is not supported as it could break HMR in dev for frameworks like Vue
+       */
+      logger.warn(
+        `NODE_ENV=${userNodeEnv} is not supported in the .env file. ` +
+          `Only NODE_ENV=development is supported to create a development build of your project. ` +
+          `If you need to set process.env.NODE_ENV, you can set it in the Vite config instead.`,
+      )
+    }
+  }
+
+  const isProduction = process.env['NODE_ENV'] === 'production'
+
+  /**
+   * Resolve public base url.
+   */
+  const isBuild = command === 'build'
+
+  const relativeBaseShortcut = config.base === '' || config.base === './'
+
+  /**
+   * During dev, we ignore relative base and fallback to '/'
+   *
+   * For the SSR build, relative base isn't possible by means of import.meta.url.
+   */
+  const resolvedBase = relativeBaseShortcut
+    ? !isBuild || config.build?.ssr
+      ? '/'
+      : './'
+    : resolveBaseUrl(config.base, isBuild, logger) ?? '/'
+
+  const resolvedBuildOptions = resolveBuildOptions(config.build, logger, resolvedRoot)
+
+  /**
+   * Resolve cache directory.
+   */
+  const pkgDir = findNearestPackageData(resolvedRoot, packageCache)?.dir
+
+  const cacheDir = normalizePath(
+    config.cacheDirectory
+      ? path.resolve(resolvedRoot, config.cacheDirectory)
+      : pkgDir
+      ? path.join(pkgDir, `node_modules/.vite`)
+      : path.join(resolvedRoot, `.vite`),
+  )
+
+  const assetsFilter =
+    config.assetsInclude && (!Array.isArray(config.assetsInclude) || config.assetsInclude.length)
+      ? createFilter(config.assetsInclude)
+      : () => false
+
+  /**
+   * Create an internal resolver to be used in special scenarios
+   *
+   * e.g. optimizer & handling css @imports
+   */
+  const createResolver: ResolvedConfig['createResolver'] = (options) => {
+    let aliasContainer: PluginContainer | undefined
+    let resolverContainer: PluginContainer | undefined
+
+    return async (id, importer, aliasOnly, ssr) => {
+      let container: PluginContainer
+
+      if (aliasOnly) {
+        container =
+          aliasContainer ||
+          (aliasContainer = await createPluginContainer({
+            ...resolved,
+            plugins: [aliasPlugin({ entries: resolved.resolve.alias })],
+          }))
+      } else {
+        container =
+          resolverContainer ||
+          (resolverContainer = await createPluginContainer({
+            ...resolved,
+            plugins: [
+              aliasPlugin({ entries: resolved.resolve.alias }),
+              resolvePlugin({
+                ...resolved.resolve,
+                root: resolvedRoot,
+                isProduction,
+                isBuild: command === 'build',
+                ssrConfig: resolved.ssr,
+                asSrc: true,
+                preferRelative: false,
+                tryIndex: true,
+                ...options,
+                idOnly: true,
+              }),
+            ],
+          }))
+      }
+
+      return (await container.resolveId(id, importer, { ssr, scan: options?.scan }))?.id
+    }
+  }
+
+  const { publicDirectory } = config
+
+  const resolvedPublicDir =
+    publicDirectory !== false && publicDirectory !== ''
+      ? path.resolve(resolvedRoot, typeof publicDirectory === 'string' ? publicDirectory : 'public')
+      : ''
+
+  const server = resolveServerOptions(resolvedRoot, config.server, logger)
+
+  const ssr = resolveSSROptions(
+    config.ssr,
+    resolveOptions.preserveSymlinks,
+    config.legacy?.buildSsrCjsExternalHeuristics,
+  )
+
+  const middlewareMode = config?.server?.middlewareMode
+
+  const optimizeDeps = config.optimizeDeps || {}
+
+  const BASE_URL = resolvedBase
+
+  /**
+   * Resolve worker.
+   */
+  let workerConfig = mergeConfig({}, config)
+
+  const [workerPrePlugins, workerNormalPlugins, workerPostPlugins] =
+    sortUserPlugins(rawWorkerUserPlugins)
+
+  /**
+   * Run config hooks.
+   */
+  const workerUserPlugins = [...workerPrePlugins, ...workerNormalPlugins, ...workerPostPlugins]
+
+  workerConfig = await runConfigHook(workerConfig, workerUserPlugins, configEnv)
+
+  const resolvedWorkerOptions: ResolveWorkerOptions = {
+    format: workerConfig.worker?.format || 'iife',
+    plugins: [],
+    rollupOptions: workerConfig.worker?.rollupOptions || {},
+    getSortedPlugins: undefined!,
+    getSortedPluginHooks: undefined!,
+  }
+
+  const resolvedConfig: ResolvedConfig = {
+    configFile: configFile ? normalizePath(configFile) : undefined,
+    configFileDependencies: configFileDependencies.map((name) => normalizePath(path.resolve(name))),
+    inlineConfig,
+    root: resolvedRoot,
+    base: resolvedBase.endsWith('/') ? resolvedBase : resolvedBase + '/',
+    rawBase: resolvedBase,
+    resolve: resolveOptions,
+    publicDir: resolvedPublicDir,
+    cacheDir,
+    command,
+    mode,
+    ssr,
+    isWorker: false,
+    mainConfig: null,
+    isProduction,
+    plugins: userPlugins,
+    css: resolveCSSOptions(config.css),
+    esbuild:
+      config.esbuild === false
+        ? false
+        : {
+            jsxDev: !isProduction,
+            ...config.esbuild,
+          },
+    server,
+    build: resolvedBuildOptions,
+    preview: resolvePreviewOptions(config.preview, server),
+    envDir,
+    env: {
+      ...userEnv,
+      BASE_URL,
+      MODE: mode,
+      DEV: !isProduction,
+      PROD: isProduction,
+    },
+    assetsInclude(file: string) {
+      return DEFAULT_ASSETS_REGEX.test(file) || assetsFilter(file)
+    },
+    logger,
+    packageCache,
+    createResolver,
+    optimizeDeps: {
+      disabled: 'build',
+      ...optimizeDeps,
+      esbuildOptions: {
+        preserveSymlinks: resolveOptions.preserveSymlinks,
+        ...optimizeDeps.esbuildOptions,
+      },
+    },
+    worker: resolvedWorkerOptions,
+    appType: config.appType ?? (middlewareMode === 'ssr' ? 'custom' : 'spa'),
+    experimental: {
+      importGlobRestoreExtension: false,
+      hmrPartialAccept: false,
+      ...config.experimental,
+    },
+    getSortedPlugins: undefined!,
+    getSortedPluginHooks: undefined!,
+  }
+
+  const resolved: ResolvedConfig = {
+    ...config,
+    ...resolvedConfig,
+  }
+
+  ;(resolved.plugins as Plugin[]) = await resolvePlugins(
+    resolved,
+    prePlugins,
+    normalPlugins,
+    postPlugins,
+  )
+  Object.assign(resolved, createPluginHookUtils(resolved.plugins))
+
+  const workerResolved: ResolvedConfig = {
+    ...workerConfig,
+    ...resolvedConfig,
+    isWorker: true,
+    mainConfig: resolved,
+  }
+
+  resolvedConfig.worker.plugins = await resolvePlugins(
+    workerResolved,
+    workerPrePlugins,
+    workerNormalPlugins,
+    workerPostPlugins,
+  )
+
+  Object.assign(resolvedConfig.worker, createPluginHookUtils(resolvedConfig.worker.plugins))
+
+  /**
+   * Call configResolved hooks.
+   */
+  await Promise.all([
+    ...resolved.getSortedPluginHooks('configResolved').map((hook) => hook(resolved)),
+    ...resolvedConfig.worker
+      .getSortedPluginHooks('configResolved')
+      .map((hook) => hook(workerResolved)),
+  ])
+
+  // validate config
+
+  if (middlewareMode === 'ssr') {
+    logger.warn(
+      colors.yellow(
+        `Setting server.middlewareMode to 'ssr' is deprecated, set server.middlewareMode to \`true\`${
+          config.appType === 'custom' ? '' : ` and appType to 'custom'`
+        } instead`,
+      ),
+    )
+  }
+  if (middlewareMode === 'html') {
+    logger.warn(
+      colors.yellow(
+        `Setting server.middlewareMode to 'html' is deprecated, set server.middlewareMode to \`true\` instead`,
+      ),
+    )
+  }
+
+  if (config.server?.force && !isBuild && config.optimizeDeps?.force === undefined) {
+    resolved.optimizeDeps.force = true
+
+    logger.warn(colors.yellow(`server.force is deprecated, use optimizeDeps.force instead`))
+  }
+
+  debug?.(`using resolved config: %O`, {
+    ...resolved,
+    plugins: resolved.plugins.map((p) => p.name),
+    worker: {
+      ...resolved.worker,
+      plugins: resolved.worker.plugins.map((p) => p.name),
+    },
+  })
+
+  if (config.build?.terserOptions && config.build.minify !== 'terser') {
+    logger.warn(
+      colors.yellow(
+        `build.terserOptions is specified but build.minify is not set to use Terser. ` +
+          `Note Vite now defaults to use esbuild for minification. If you still ` +
+          `prefer Terser, set build.minify to "terser".`,
+      ),
+    )
+  }
+
+  /**
+   * Check if all assetFileNames have the same reference.
+   * If not, warn the user.
+   */
+  const outputOption = config.build?.rollupOptions?.output ?? []
+
+  /**
+   * Use {@link Array.isArray} to narrow its type to array.
+   */
+  if (Array.isArray(outputOption)) {
+    const assetFileNamesList = outputOption.map((output) => output.assetFileNames)
+
+    if (assetFileNamesList.length > 1) {
+      const firstAssetFileNames = assetFileNamesList[0]
+      const hasDifferentReference = assetFileNamesList.some(
+        (assetFileNames) => assetFileNames !== firstAssetFileNames,
+      )
+      if (hasDifferentReference) {
+        resolved.logger.warn(
+          colors.yellow(
+            `assetFileNames isn't equal for every build.rollupOptions.output. A single pattern across all outputs is supported by Vite.`,
+          ),
+        )
+      }
+    }
+  }
+
+  /**
+   * Warn about removal of experimental features.
+   */
+  if (config.legacy?.buildSsrCjsExternalHeuristics || config.ssr?.format === 'cjs') {
+    resolved.logger.warn(
+      colors.yellow(`
+(!) Experimental legacy.buildSsrCjsExternalHeuristics and ssr.format: 'cjs' are going to be removed in Vite 5. 
+    Find more information and give feedback at https://github.com/vitejs/vite/discussions/13816.
+`),
+    )
+  }
+
+  return resolved
+}
+
+export async function loadConfigFromFile(
+  configEnv: ConfigEnv,
+  configFile?: string,
+  configRoot: string = process.cwd(),
+  logLevel?: LogLevel,
+): Promise<{
+  path: string
+  config: UserConfig
+  dependencies: string[]
+} | null> {
+  const start = performance.now()
+  const getTime = () => `${(performance.now() - start).toFixed(2)}ms`
+
+  let resolvedPath: string | undefined
+
+  if (configFile) {
+    // explicit config path is always resolved from cwd
+    resolvedPath = path.resolve(configFile)
+  } else {
+    // implicit config file loaded from inline root (if present)
+    // otherwise from cwd
+    for (const filename of DEFAULT_CONFIG_FILES) {
+      const filePath = path.resolve(configRoot, filename)
+      if (!fs.existsSync(filePath)) continue
+
+      resolvedPath = filePath
+      break
+    }
+  }
+
+  if (!resolvedPath) {
+    debug?.('no config file found.')
+    return null
+  }
+
+  let isESM = false
+
+  if (/\.m[jt]s$/.test(resolvedPath)) {
+    isESM = true
+  } else if (/\.c[jt]s$/.test(resolvedPath)) {
+    isESM = false
+  } else {
+    // check package.json for type: "module" and set `isESM` to true
+    try {
+      const pkg = lookupFile(configRoot, ['package.json'])
+      isESM = !!pkg && JSON.parse(fs.readFileSync(pkg, 'utf-8')).type === 'module'
+    } catch (e) {}
+  }
+
+  try {
+    const bundled = await bundleConfigFile(resolvedPath, isESM)
+    const userConfig = await loadConfigFromBundledFile(resolvedPath, bundled.code, isESM)
+
+    debug?.(`bundled config file loaded in ${getTime()}`)
+
+    const config = await (typeof userConfig === 'function' ? userConfig(configEnv) : userConfig)
+    if (!isObject(config)) {
+      throw new Error(`config must export or return an object.`)
+    }
+    return {
+      path: normalizePath(resolvedPath),
+      config,
+      dependencies: bundled.dependencies,
+    }
+  } catch (e) {
+    createLogger(logLevel).error(colors.red(`failed to load config from ${resolvedPath}`), {
+      error: e as Error,
+    })
+    throw e
+  }
 }
