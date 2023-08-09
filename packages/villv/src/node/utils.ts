@@ -565,7 +565,7 @@ export function isDefined<T>(value: T): value is NonNullable<T> {
   return value != null
 }
 
-export function tryStateSync(file: string): fs.Stats | undefined {
+export function tryStatSync(file: string): fs.Stats | undefined {
   try {
     return fs.statSync(file, { throwIfNoEntry: false })
   } catch {
@@ -581,7 +581,7 @@ export function lookupFile(directory: string, fileNames: string[]): string | und
     for (const fileName of fileNames) {
       const file = path.join(directory, fileName)
 
-      if (tryStateSync(file)?.isFile()) {
+      if (tryStatSync(file)?.isFile()) {
         return file
       }
 

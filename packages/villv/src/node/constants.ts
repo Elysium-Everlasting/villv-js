@@ -10,6 +10,11 @@ import { getClosestProjectDirectory } from '../utils/project.js'
 export const VERSION = version
 
 /**
+ * Default prefix added to environment variables managed by Vite.
+ */
+export const ENV_PREFIX = 'VITE_'
+
+/**
  * I have no clue what these refer to.
  * Something in Rollup?
  */
