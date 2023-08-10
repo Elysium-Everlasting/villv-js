@@ -1,4 +1,5 @@
 import fs from 'node:fs'
+import fsp from 'node:fs/promises'
 import path from 'node:path'
 // import util from 'node:util'
 import type {
@@ -10,7 +11,7 @@ import type {
   WatcherOptions,
 } from 'rollup'
 import colors from 'picocolors'
-import type { BuildOptions as ESBuildOptions, TransformOptions } from 'esbuild'
+import { build, type BuildOptions as ESBuildOptions, type TransformOptions } from 'esbuild'
 import type { Alias } from '@rollup/plugin-alias'
 import type { RollupDynamicImportVariablesOptions } from '@rollup/plugin-dynamic-import-vars'
 import type { RollupCommonJSOptions } from '@rollup/plugin-commonjs'
@@ -25,14 +26,22 @@ import {
   ENV_PREFIX,
   ESBUILD_MODULES_TARGET,
   FS_PREFIX,
+  OPTIMIZABLE_ENTRY_REGEX,
+  SPECIAL_QUERY_REGEX,
 } from './constants.js'
 import { createLogger, type Logger, type LogLevel } from './logger.js'
 import {
   asyncFlatten,
+  bareImportREGEX,
+  cleanUrl,
   createDebugger,
   createFilter,
+  deepImportREGEX,
+  isBuiltin,
   isExternalUrl,
+  isInNodeModules,
   isObject,
+  isOptimizable,
   lookupFile,
   mergeAlias,
   mergeConfig,
@@ -41,7 +50,13 @@ import {
   requireResolveFromRootWithFallback,
 } from './utils.js'
 import { loadEnv, resolveEnvPrefix } from './env.js'
-import { findNearestPackageData, type PackageCache } from './packages.js'
+import {
+  findNearestMainPackageData,
+  findNearestPackageData,
+  resolvePackageData,
+  type PackageCache,
+} from './packages.js'
+import { pathToFileURL } from 'node:url'
 
 const debug = createDebugger('vite:config')
 // const promisifiedRealpath = util.promisify(fs.realpath)
@@ -1604,4 +1619,335 @@ export function resolveBuildOptions(
   }
 
   return resolved
+}
+
+async function bundleConfigFile(
+  fileName: string,
+  isESM: boolean,
+): Promise<{ code: string; dependencies: string[] }> {
+  const dirnameVarName = '__vite_injected_original_dirname'
+  const filenameVarName = '__vite_injected_original_filename'
+  const importMetaUrlVarName = '__vite_injected_original_import_meta_url'
+  const result = await build({
+    absWorkingDir: process.cwd(),
+    entryPoints: [fileName],
+    outfile: 'out.js',
+    write: false,
+    target: ['node14.18', 'node16'],
+    platform: 'node',
+    bundle: true,
+    format: isESM ? 'esm' : 'cjs',
+    mainFields: ['main'],
+    sourcemap: 'inline',
+    metafile: true,
+    define: {
+      __dirname: dirnameVarName,
+      __filename: filenameVarName,
+      'import.meta.url': importMetaUrlVarName,
+    },
+    plugins: [
+      {
+        name: 'externalize-deps',
+        setup(build) {
+          const packageCache = new Map()
+          const resolveByViteResolver = (id: string, importer: string, isRequire: boolean) => {
+            return tryNodeResolve(
+              id,
+              importer,
+              {
+                root: path.dirname(fileName),
+                isBuild: true,
+                isProduction: true,
+                preferRelative: false,
+                tryIndex: true,
+                mainFields: [],
+                browserField: false,
+                conditions: [],
+                overrideConditions: ['node'],
+                dedupe: [],
+                extensions: DEFAULT_EXTENSIONS,
+                preserveSymlinks: false,
+                packageCache,
+                isRequire,
+              },
+              false,
+            )?.id
+          }
+          const isESMFile = (id: string): boolean => {
+            if (id.endsWith('.mjs')) return true
+            if (id.endsWith('.cjs')) return false
+
+            const nearestPackageJson = findNearestPackageData(path.dirname(id), packageCache)
+            return !!nearestPackageJson && nearestPackageJson.data.type === 'module'
+          }
+
+          // externalize bare imports
+          build.onResolve({ filter: /^[^.].*/ }, async ({ path: id, importer, kind }) => {
+            if (kind === 'entry-point' || path.isAbsolute(id) || isBuiltin(id)) {
+              return
+            }
+
+            // partial deno support as `npm:` does not work with esbuild
+            if (id.startsWith('npm:')) {
+              return { external: true }
+            }
+
+            const isImport = isESM || kind === 'dynamic-import'
+            let idFsPath: string | undefined
+            try {
+              idFsPath = resolveByViteResolver(id, importer, !isImport)
+            } catch (e) {
+              if (!isImport) {
+                let canResolveWithImport = false
+                try {
+                  canResolveWithImport = !!resolveByViteResolver(id, importer, false)
+                } catch {}
+                if (canResolveWithImport) {
+                  throw new Error(
+                    `Failed to resolve ${JSON.stringify(
+                      id,
+                    )}. This package is ESM only but it was tried to load by \`require\`. See http://vitejs.dev/guide/troubleshooting.html#this-package-is-esm-only for more details.`,
+                  )
+                }
+              }
+              throw e
+            }
+            if (idFsPath && isImport) {
+              idFsPath = pathToFileURL(idFsPath).href
+            }
+            if (idFsPath && !isImport && isESMFile(idFsPath)) {
+              throw new Error(
+                `${JSON.stringify(
+                  id,
+                )} resolved to an ESM file. ESM file cannot be loaded by \`require\`. See http://vitejs.dev/guide/troubleshooting.html#this-package-is-esm-only for more details.`,
+              )
+            }
+            return {
+              path: idFsPath,
+              external: true,
+            }
+          })
+        },
+      },
+      {
+        name: 'inject-file-scope-variables',
+        setup(build) {
+          build.onLoad({ filter: /\.[cm]?[jt]s$/ }, async (args) => {
+            const contents = await fsp.readFile(args.path, 'utf8')
+            const injectValues =
+              `const ${dirnameVarName} = ${JSON.stringify(path.dirname(args.path))};` +
+              `const ${filenameVarName} = ${JSON.stringify(args.path)};` +
+              `const ${importMetaUrlVarName} = ${JSON.stringify(pathToFileURL(args.path).href)};`
+
+            return {
+              loader: args.path.endsWith('ts') ? 'ts' : 'js',
+              contents: injectValues + contents,
+            }
+          })
+        },
+      },
+    ],
+  })
+
+  const code = result.outputFiles[0]?.text ?? ''
+
+  return {
+    code,
+    dependencies: result.metafile ? Object.keys(result.metafile.inputs) : [],
+  }
+}
+
+export function tryNodeResolve(
+  id: string,
+  importer: string | null | undefined,
+  options: InternalResolveOptionsWithOverrideConditions,
+  targetWeb: boolean,
+  depsOptimizer?: DepsOptimizer,
+  ssr: boolean = false,
+  externalize?: boolean,
+  allowLinkedExternal: boolean = true,
+): PartialResolvedId | undefined {
+  const { root, dedupe, isBuild, preserveSymlinks, packageCache } = options
+
+  // check for deep import, e.g. "my-lib/foo"
+  const deepMatch = id.match(deepImportREGEX)
+
+  const pkgId = deepMatch ? deepMatch[1] ?? deepMatch[2] ?? '' : id
+
+  let basedir: string
+
+  if (dedupe?.includes(pkgId)) {
+    basedir = root
+  } else if (
+    importer &&
+    path.isAbsolute(importer) &&
+    // css processing appends `*` for importer
+    (importer[importer.length - 1] === '*' || fs.existsSync(cleanUrl(importer)))
+  ) {
+    basedir = path.dirname(importer)
+  } else {
+    basedir = root
+  }
+
+  const pkg = resolvePackageData(pkgId, basedir, preserveSymlinks, packageCache)
+
+  if (!pkg) {
+    // if import can't be found, check if it's an optional peer dep.
+    // if so, we can resolve to a special id that errors only when imported.
+    if (
+      basedir !== root && // root has no peer dep
+      !isBuiltin(id) &&
+      !id.includes('\0') &&
+      bareImportREGEX.test(id)
+    ) {
+      const mainPkg = findNearestMainPackageData(basedir, packageCache)?.data
+      if (mainPkg) {
+        if (mainPkg['peerDependencies']?.[id] && mainPkg['peerDependenciesMeta']?.[id]?.optional) {
+          return {
+            id: `${optionalPeerDepId}:${id}:${mainPkg.name}`,
+          }
+        }
+      }
+    }
+    return
+  }
+
+  const resolveId = deepMatch ? resolveDeepImport : resolvePackageEntry
+  const unresolvedId = deepMatch ? '.' + id.slice(pkgId.length) : pkgId
+
+  let resolved: string | undefined
+  try {
+    resolved = resolveId(unresolvedId, pkg, targetWeb, options)
+  } catch (err) {
+    if (!options.tryEsmOnly) {
+      throw err
+    }
+  }
+  if (!resolved && options.tryEsmOnly) {
+    resolved = resolveId(unresolvedId, pkg, targetWeb, {
+      ...options,
+      isRequire: false,
+      mainFields: DEFAULT_MAIN_FIELDS,
+      extensions: DEFAULT_EXTENSIONS,
+    })
+  }
+  if (!resolved) {
+    return
+  }
+
+  const processResult = (resolved: PartialResolvedId) => {
+    if (!externalize) {
+      return resolved
+    }
+    // don't external symlink packages
+    if (!allowLinkedExternal && !isInNodeModules(resolved.id)) {
+      return resolved
+    }
+    const resolvedExt = path.extname(resolved.id)
+    // don't external non-js imports
+    if (resolvedExt && resolvedExt !== '.js' && resolvedExt !== '.mjs' && resolvedExt !== '.cjs') {
+      return resolved
+    }
+    let resolvedId = id
+    if (deepMatch && !pkg?.data.exports && path.extname(id) !== resolvedExt) {
+      // id date-fns/locale
+      // resolve.id ...date-fns/esm/locale/index.js
+      const index = resolved.id.indexOf(id)
+      if (index > -1) {
+        resolvedId = resolved.id.slice(index)
+        debug?.(`[processResult] ${colors.cyan(id)} -> ${colors.dim(resolvedId)}`)
+      }
+    }
+    return { ...resolved, id: resolvedId, external: true }
+  }
+
+  if (!options.idOnly && ((!options.scan && isBuild && !depsOptimizer) || externalize)) {
+    // Resolve package side effects for build so that rollup can better
+    // perform tree-shaking
+    return processResult({
+      id: resolved,
+      moduleSideEffects: pkg.hasSideEffects(resolved),
+    })
+  }
+
+  const ext = path.extname(resolved)
+
+  if (
+    !options.ssrOptimizeCheck &&
+    (!isInNodeModules(resolved) || // linked
+      !depsOptimizer || // resolving before listening to the server
+      options.scan) // initial esbuild scan phase
+  ) {
+    return { id: resolved }
+  }
+
+  // if we reach here, it's a valid dep import that hasn't been optimized.
+  const isJsType = depsOptimizer
+    ? isOptimizable(resolved, depsOptimizer.options)
+    : OPTIMIZABLE_ENTRY_REGEX.test(resolved)
+
+  let exclude = depsOptimizer?.options.exclude
+  let include = depsOptimizer?.options.include
+  if (options.ssrOptimizeCheck) {
+    // we don't have the depsOptimizer
+    exclude = options.ssrConfig?.optimizeDeps?.exclude
+    include = options.ssrConfig?.optimizeDeps?.include
+  }
+
+  const skipOptimization =
+    depsOptimizer?.options.noDiscovery ||
+    !isJsType ||
+    (importer && isInNodeModules(importer)) ||
+    exclude?.includes(pkgId) ||
+    exclude?.includes(id) ||
+    SPECIAL_QUERY_REGEX.test(resolved) ||
+    // During dev SSR, we don't have a way to reload the module graph if
+    // a non-optimized dep is found. So we need to skip optimization here.
+    // The only optimized deps are the ones explicitly listed in the config.
+    (!options.ssrOptimizeCheck && !isBuild && ssr) ||
+    // Only optimize non-external CJS deps during SSR by default
+    (ssr &&
+      !(
+        ext === '.cjs' ||
+        (ext === '.js' &&
+          findNearestPackageData(path.dirname(resolved), options.packageCache)?.data.type !==
+            'module')
+      ) &&
+      !(include?.includes(pkgId) || include?.includes(id)))
+
+  if (options.ssrOptimizeCheck) {
+    return {
+      id: skipOptimization ? injectQuery(resolved, `__vite_skip_optimization`) : resolved,
+    }
+  }
+
+  if (skipOptimization) {
+    // excluded from optimization
+    // Inject a version query to npm deps so that the browser
+    // can cache it without re-validation, but only do so for known js types.
+    // otherwise we may introduce duplicated modules for externalized files
+    // from pre-bundled deps.
+    if (!isBuild) {
+      const versionHash = depsOptimizer!.metadata.browserHash
+      if (versionHash && isJsType) {
+        resolved = injectQuery(resolved, `v=${versionHash}`)
+      }
+    }
+  } else {
+    // this is a missing import, queue optimize-deps re-run and
+    // get a resolved its optimized info
+    const optimizedInfo = depsOptimizer!.registerMissingImport(id, resolved)
+    resolved = depsOptimizer!.getOptimizedDepId(optimizedInfo)
+  }
+
+  if (!options.idOnly && !options.scan && isBuild) {
+    // Resolve package side effects for build so that rollup can better
+    // perform tree-shaking
+    return {
+      id: resolved,
+      moduleSideEffects: pkg.hasSideEffects(resolved),
+    }
+  } else {
+    return { id: resolved! }
+  }
 }
