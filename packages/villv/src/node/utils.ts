@@ -1,6 +1,7 @@
 import os from 'node:os'
 import fs from 'node:fs'
 import path from 'node:path'
+import url from 'node:url'
 import crypto from 'node:crypto'
 import { promises as dns } from 'node:dns'
 import { exec } from 'node:child_process'
@@ -26,6 +27,7 @@ import {
 import type { DecodedSourceMap, RawSourceMap } from '@ampproject/remapping'
 import remapping from '@ampproject/remapping'
 import type { ResolvedServerUrls } from './logger.js'
+import { resolvePackageData } from './packages.js'
 
 /**
  * Specifies an `Object`, or an `Array` of `Object`,
@@ -248,7 +250,7 @@ export function isBuiltin(id: string): boolean {
 /**
  * Whether the module was imported from the 'node_modules' directory.
  */
-export function isNodeModule(id: string): boolean {
+export function isInNodeModules(id: string): boolean {
   return id.includes('node_modules')
 }
 
@@ -1242,6 +1244,24 @@ export function parseRequest(id: string): Record<string, string> | null {
 
 export function getHash(text: Buffer | string): string {
   return crypto.createHash('sha256').update(text).digest('hex').substring(0, 8)
+}
+
+const _dirname = path.dirname(url.fileURLToPath(import.meta.url))
+
+export const requireResolveFromRootWithFallback = (root: string, id: string): string => {
+  // check existence first, so if the package is not found,
+  // it won't be cached by nodejs, since there isn't a way to invalidate them:
+  // https://github.com/nodejs/node/issues/44663
+  const found = resolvePackageData(id, root) || resolvePackageData(id, _dirname)
+  if (!found) {
+    const error = new Error(`${JSON.stringify(id)} not found.`)
+    ;(error as any).code = 'MODULE_NOT_FOUND'
+    throw error
+  }
+
+  // actually resolve
+  // Search in the root directory first, and fallback to the default require paths.
+  return _require.resolve(id, { paths: [root, _dirname] })
 }
 
 export function emptyCssComments(raw: string): string {

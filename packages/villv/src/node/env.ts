@@ -10,7 +10,7 @@ const defaultEnvFile = '.env'
 
 const defaultLocalEnvFile = '.env.local'
 
-export function loadEvn(
+export function loadEnv(
   mode: string,
   envDirectory: string,
   prefixes: string | string[] = ENV_PREFIX,

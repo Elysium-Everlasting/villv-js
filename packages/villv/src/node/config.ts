@@ -1,10 +1,20 @@
 import fs from 'node:fs'
 import path from 'node:path'
 // import util from 'node:util'
-import type { ObjectHook, RollupOptions, Plugin as RollupPlugin } from 'rollup'
+import type {
+  InputOption,
+  ModuleFormat,
+  ObjectHook,
+  RollupOptions,
+  Plugin as RollupPlugin,
+  WatcherOptions,
+} from 'rollup'
 import colors from 'picocolors'
-import type { BuildOptions as ESBuildOptions } from 'esbuild'
+import type { BuildOptions as ESBuildOptions, TransformOptions } from 'esbuild'
 import type { Alias } from '@rollup/plugin-alias'
+import type { RollupDynamicImportVariablesOptions } from '@rollup/plugin-dynamic-import-vars'
+import type { RollupCommonJSOptions } from '@rollup/plugin-commonjs'
+import type Terser from 'terser'
 import {
   CLIENT_ENTRY,
   DEFAULT_ASSETS_REGEX,
@@ -13,20 +23,25 @@ import {
   DEFAULT_MAIN_FIELDS,
   ENV_ENTRY,
   ENV_PREFIX,
+  ESBUILD_MODULES_TARGET,
   FS_PREFIX,
 } from './constants.js'
 import { createLogger, type Logger, type LogLevel } from './logger.js'
 import {
   asyncFlatten,
   createDebugger,
+  createFilter,
+  isExternalUrl,
   isObject,
   lookupFile,
   mergeAlias,
   mergeConfig,
   normalizeAlias,
   normalizePath,
+  requireResolveFromRootWithFallback,
 } from './utils.js'
-import { resolveEnvPrefix } from './env.js'
+import { loadEnv, resolveEnvPrefix } from './env.js'
+import { findNearestPackageData, type PackageCache } from './packages.js'
 
 const debug = createDebugger('vite:config')
 // const promisifiedRealpath = util.promisify(fs.realpath)
@@ -36,10 +51,69 @@ const debug = createDebugger('vite:config')
  */
 export interface Plugin extends RollupPlugin {
   /**
+   * Enforce plugin invocation tier similar to webpack loaders.
+   *
+   * Plugin invocation order:
+   * - alias resolution
+   * - `enforce: 'pre'` plugins
+   * - vite core plugins
+   * - normal plugins
+   * - vite build plugins
+   * - `enforce: 'post'` plugins
+   * - vite build post plugins
+   */
+  enforce?: 'pre' | 'post'
+
+  /**
    * Apply the plugin only for serve or build, or on certain conditions.
    */
   apply?: ConfigCommand | ((this: void, config: UserConfig, env: ConfigEnv) => boolean)
+
+  /**
+   * Modify vite config before it's resolved.
+   *
+   * The hook can either mutate the passed-in config directly,
+   * or return a partial config object that will be deeply merged into existing config.
+   *
+   * Note: User plugins are resolved before running this hook so injecting other
+   * plugins inside  the `config` hook will have no effect.
+   */
+  config?: ObjectHook<(this: void, config: UserConfig, env: ConfigEnv) => ModifiedConfigResult>
+
+  /**
+   * Perform custom handling of HMR updates.
+   * The handler receives a context containing changed filename, timestamp, a
+   * list of modules affected by the file change, and the dev server instance.
+   *
+   * - The hook can return a filtered list of modules to narrow down the update.
+   *   e.g. for a Vue SFC, we can narrow down the part to update by comparing
+   *   the descriptors.
+   *
+   * - The hook can also return an empty array and then perform custom updates
+   *   by sending a custom hmr payload via server.ws.send().
+   *
+   * - If the hook doesn't return a value, the hmr update will be performed as
+   *   normal.
+   */
+  handleHotUpdate?: ObjectHook<
+    (this: void, ctx: HmrContext) => Array<ModuleNode> | void | Promise<Array<ModuleNode> | void>
+  >
 }
+
+/**
+ * TODO
+ */
+interface HmrContext {
+  file: string
+  timestamp: number
+}
+
+/**
+ * TODO
+ */
+interface ModuleNode {}
+
+type ModifiedConfigResult = UserConfig | null | void | Promise<UserConfig | null | void>
 
 export type UserConfig = {
   /**
@@ -263,7 +337,7 @@ type InternalConfig = {
 
   cacheDir: string
 
-  command: 'build' | 'serve'
+  command: ConfigCommand
 
   mode: string
 
@@ -353,9 +427,47 @@ export interface InlineConfig extends UserConfig {
 }
 
 /**
- * TODO
+ * TODO: move somewhere else?
  */
-export interface ResolveOptions {}
+export interface ResolveOptions {
+  /**
+   * Idk. What are browser or main fields??
+   *
+   * @default ['module', 'jsnext:main', 'jsnext']
+   */
+  mainFields?: string[]
+
+  /**
+   * @deprecated In future, `mainFields` should be used instead.
+   *
+   * @default true
+   */
+  browserField?: boolean
+
+  /**
+   * Idk.
+   */
+  conditions?: string[]
+
+  /**
+   * Idk.
+   *
+   * @default ['.mjs', '.js', '.mts', '.ts', '.jsx', '.tsx', '.json']
+   */
+  extensions?: string[]
+
+  /**
+   * Idk.
+   */
+  dedupe?: string[]
+
+  /**
+   * Idk.
+   *
+   * @default false
+   */
+  preserveSymlinks?: boolean
+}
 
 /**
  */
@@ -409,7 +521,7 @@ export interface WorkerBundleOptions {
 
 export type WorkerBundleFormat = 'es' | 'iife'
 
-export type ConfigCommand = 'build' | 'server'
+export type ConfigCommand = 'build' | 'serve'
 
 /**
  * spa: Include SPA fallback middleware and configure sirv with `single: true` in preview.
@@ -453,11 +565,6 @@ export function defineConfig<T extends UserConfigExport>(config: T): T {
   return config
 }
 
-/**
- * TODO
- */
-export interface PackageCache {}
-
 export async function resolveConfig(
   inlineConfig: InlineConfig,
   command: ConfigCommand,
@@ -467,6 +574,7 @@ export async function resolveConfig(
   let config = inlineConfig
   let configFileDependencies: string[] = []
   let mode = inlineConfig.mode ?? defaultMode
+
   const isNodeEnvSet = !!process.env['NODE_ENV']
   const packageCache: PackageCache = new Map()
 
@@ -484,15 +592,18 @@ export async function resolveConfig(
     ssrBuild: !!config.build?.ssr,
   }
 
-  let { configFile } = config
+  let { configFile, root } = config
 
   if (configFile !== false) {
-    const loadResult = await loadConfigFromFile(configEnv, configFile, config.root, config.logLevel)
-    if (loadResult) {
-      config = mergeConfig(loadResult.config, config)
-      configFile = loadResult.path
-      configFileDependencies = loadResult.dependencies
-    }
+    await loadConfigFromFile({ configFile, configEnv, root }, config.logLevel).then(
+      (loadResult) => {
+        if (loadResult) {
+          config = mergeConfig(loadResult.config, config)
+          configFile = loadResult.path
+          configFileDependencies = loadResult.dependencies
+        }
+      },
+    )
   }
 
   /**
@@ -517,20 +628,22 @@ export async function resolveConfig(
    * And Plugins may also have cached that could be corrupted by being used in these extra rollup calls.
    * So we need to separate the worker plugin from the plugin that vite needs to run.
    */
-  const rawWorkerUserPlugins = await asyncFlatten(config.worker?.plugins || []).then((plugins) =>
+  const rawWorkerUserPlugins = await asyncFlatten(config.worker?.plugins ?? []).then((plugins) =>
     (plugins as Plugin[]).filter(filterPlugin),
   )
 
   /**
    * Resolve plugins.
    */
-  const rawUserPlugins = await asyncFlatten(config.plugins || []).then((plugins) =>
+  const rawUserPlugins = await asyncFlatten(config.plugins ?? []).then((plugins) =>
     (plugins as Plugin[]).filter(filterPlugin),
   )
 
   const [prePlugins, normalPlugins, postPlugins] = sortUserPlugins(rawUserPlugins)
 
-  // run config hooks
+  /**
+   * Run config hooks.
+   */
   const userPlugins = [...prePlugins, ...normalPlugins, ...postPlugins]
 
   config = await runConfigHook(config, userPlugins, configEnv)
@@ -814,12 +927,8 @@ export async function resolveConfig(
     ...resolvedConfig,
   }
 
-  ;(resolved.plugins as Plugin[]) = await resolvePlugins(
-    resolved,
-    prePlugins,
-    normalPlugins,
-    postPlugins,
-  )
+  resolved.plugins = await resolvePlugins(resolved, prePlugins, normalPlugins, postPlugins)
+
   Object.assign(resolved, createPluginHookUtils(resolved.plugins))
 
   const workerResolved: ResolvedConfig = {
@@ -934,17 +1043,26 @@ export async function resolveConfig(
   return resolved
 }
 
-export async function loadConfigFromFile(
-  configEnv: ConfigEnv,
-  configFile?: string,
-  configRoot: string = process.cwd(),
-  logLevel?: LogLevel,
-): Promise<{
+export interface LoadOptions {
+  configEnv: ConfigEnv
+  configFile?: string
+  root?: string
+}
+
+export interface LoadedConfig {
   path: string
   config: UserConfig
   dependencies: string[]
-} | null> {
+}
+
+export async function loadConfigFromFile(
+  options: LoadOptions,
+  logLevel?: LogLevel,
+): Promise<LoadedConfig | null> {
+  const { configEnv, configFile, root = process.cwd() } = options
+
   const start = performance.now()
+
   const getTime = () => `${(performance.now() - start).toFixed(2)}ms`
 
   let resolvedPath: string | undefined
@@ -956,7 +1074,7 @@ export async function loadConfigFromFile(
     // implicit config file loaded from inline root (if present)
     // otherwise from cwd
     for (const filename of DEFAULT_CONFIG_FILES) {
-      const filePath = path.resolve(configRoot, filename)
+      const filePath = path.resolve(root, filename)
       if (!fs.existsSync(filePath)) continue
 
       resolvedPath = filePath
@@ -965,34 +1083,25 @@ export async function loadConfigFromFile(
   }
 
   if (!resolvedPath) {
-    debug?.('no config file found.')
+    debug?.('No config file found.')
     return null
   }
 
-  let isESM = false
-
-  if (/\.m[jt]s$/.test(resolvedPath)) {
-    isESM = true
-  } else if (/\.c[jt]s$/.test(resolvedPath)) {
-    isESM = false
-  } else {
-    // check package.json for type: "module" and set `isESM` to true
-    try {
-      const pkg = lookupFile(configRoot, ['package.json'])
-      isESM = !!pkg && JSON.parse(fs.readFileSync(pkg, 'utf-8')).type === 'module'
-    } catch (e) {}
-  }
+  const isESM = resolveIsESM(resolvedPath, root)
 
   try {
     const bundled = await bundleConfigFile(resolvedPath, isESM)
+
     const userConfig = await loadConfigFromBundledFile(resolvedPath, bundled.code, isESM)
 
     debug?.(`bundled config file loaded in ${getTime()}`)
 
     const config = await (typeof userConfig === 'function' ? userConfig(configEnv) : userConfig)
+
     if (!isObject(config)) {
       throw new Error(`config must export or return an object.`)
     }
+
     return {
       path: normalizePath(resolvedPath),
       config,
@@ -1004,4 +1113,495 @@ export async function loadConfigFromFile(
     })
     throw e
   }
+}
+
+/**
+ * @param file Path to file.
+ * @param root Root of project to find `package.json`.
+ */
+function resolveIsESM(file: string, root: string) {
+  if (/\.m[jt]s$/.test(file)) {
+    return true
+  }
+
+  if (/\.c[jt]s$/.test(file)) {
+    return false
+  }
+  // check package.json for type: "module" and set `isESM` to true
+  try {
+    const pkg = lookupFile(root, ['package.json'])
+    return !!pkg && JSON.parse(fs.readFileSync(pkg, 'utf-8')).type === 'module'
+  } catch (e) {
+    return false
+  }
+}
+
+export function sortUserPlugins(plugins?: (Plugin | Plugin[])[]): [Plugin[], Plugin[], Plugin[]] {
+  if (plugins == null) {
+    return [[], [], []]
+  }
+
+  const prePlugins = plugins.flat().filter((plugin) => plugin.enforce === 'pre')
+
+  const postPlugins = plugins.flat().filter((plugin) => plugin.enforce === 'post')
+
+  const normalPlugins = plugins
+    .flat()
+    .filter((plugin) => plugin.enforce !== 'pre' && plugin.enforce !== 'post')
+
+  return [prePlugins, normalPlugins, postPlugins]
+}
+
+async function runConfigHook(
+  config: InlineConfig,
+  plugins: Plugin[],
+  configEnv: ConfigEnv,
+): Promise<InlineConfig> {
+  /**
+   * This config will be iterated on by the plugin hooks.
+   */
+  let currentConfig = config
+
+  for (const plugin of getSortedPluginsBy('config', plugins)) {
+    const hook = plugin.config
+    const handler = hook && 'handler' in hook ? hook.handler : hook
+
+    if (!handler) {
+      continue
+    }
+
+    const res = await handler(currentConfig, configEnv)
+
+    if (res) {
+      currentConfig = mergeConfig(currentConfig, res)
+    }
+  }
+
+  return currentConfig
+}
+
+/**
+ * TODO: move somewhere else.
+ */
+export function getSortedPluginsBy(key: keyof Plugin, plugins: Plugin[]): Plugin[] {
+  const pluginHooks = plugins
+    .map((plugin) => ({ plugin, hook: plugin[key] }))
+    .filter(({ hook }) => hook != null)
+
+  const pre = pluginHooks
+    .filter(({ hook }) => typeof hook === 'object' && hook.order === 'pre')
+    .map(({ plugin }) => plugin)
+
+  const post = pluginHooks
+    .filter(({ hook }) => typeof hook === 'object' && hook.order === 'post')
+    .map(({ plugin }) => plugin)
+
+  const normal = pluginHooks
+    .filter(({ hook }) => typeof hook !== 'object')
+    .map(({ plugin }) => plugin)
+
+  return [...pre, ...normal, ...post]
+}
+
+/**
+ * Resolve base url. Note that some users use Vite to build for non-web targets like
+ * electron or expects to deploy
+ */
+export function resolveBaseUrl(
+  base: UserConfig['base'] = '/',
+  isBuild: boolean,
+  logger: Logger,
+): string {
+  if (base[0] === '.') {
+    logger.warn(
+      colors.yellow(
+        colors.bold(
+          `(!) invalid "base" option: ${base}. The value can only be an absolute ` +
+            `URL, ./, or an empty string.`,
+        ),
+      ),
+    )
+    return '/'
+  }
+
+  // external URL flag
+  const isExternal = isExternalUrl(base)
+
+  // no leading slash warn
+  if (!isExternal && base[0] !== '/') {
+    logger.warn(colors.yellow(colors.bold(`(!) "base" option should start with a slash.`)))
+  }
+
+  // parse base when command is serve or base is not External URL
+  if (!isBuild || !isExternal) {
+    base = new URL(base, 'http://vitejs.dev').pathname
+
+    // ensure leading slash
+    if (base[0] !== '/') {
+      base = '/' + base
+    }
+  }
+
+  return base
+}
+
+export interface BuildOptions {
+  /**
+   * Compatibility transform target. The transform is performed with esbuild
+   * and the lowest supported target is es2015/es6. Note this only handles
+   * syntax transformation and does not cover polyfills (except for dynamic
+   * import)
+   *
+   * Default: 'modules' - Similar to `@babel/preset-env`'s targets.esmodules,
+   * transpile targeting browsers that natively support dynamic es module imports.
+   * https://caniuse.com/es6-module-dynamic-import
+   *
+   * Another special value is 'esnext' - which only performs minimal transpiling
+   * (for minification compat) and assumes native dynamic imports support.
+   *
+   * For custom targets, see https://esbuild.github.io/api/#target and
+   * https://esbuild.github.io/content-types/#javascript for more details.
+   * @default 'modules'
+   */
+  target?: 'modules' | TransformOptions['target'] | false
+
+  /**
+   * whether to inject module preload polyfill.
+   * Note: does not apply to library mode.
+   * @default true
+   * @deprecated use `modulePreload.polyfill` instead
+   */
+  polyfillModulePreload?: boolean
+  /**
+   * Configure module preload
+   * Note: does not apply to library mode.
+   * @default true
+   */
+  modulePreload?: boolean | ModulePreloadOptions
+  /**
+   * Directory relative from `root` where build output will be placed. If the
+   * directory exists, it will be removed before the build.
+   * @default 'dist'
+   */
+  outDir?: string
+  /**
+   * Directory relative from `outDir` where the built js/css/image assets will
+   * be placed.
+   * @default 'assets'
+   */
+  assetsDir?: string
+  /**
+   * Static asset files smaller than this number (in bytes) will be inlined as
+   * base64 strings. Default limit is `4096` (4kb). Set to `0` to disable.
+   * @default 4096
+   */
+  assetsInlineLimit?: number
+  /**
+   * Whether to code-split CSS. When enabled, CSS in async chunks will be
+   * inlined as strings in the chunk and inserted via dynamically created
+   * style tags when the chunk is loaded.
+   * @default true
+   */
+  cssCodeSplit?: boolean
+  /**
+   * An optional separate target for CSS minification.
+   * As esbuild only supports configuring targets to mainstream
+   * browsers, users may need this option when they are targeting
+   * a niche browser that comes with most modern JavaScript features
+   * but has poor CSS support, e.g. Android WeChat WebView, which
+   * doesn't support the #RGBA syntax.
+   * @default target
+   */
+  cssTarget?: TransformOptions['target'] | false
+  /**
+   * Override CSS minification specifically instead of defaulting to `build.minify`,
+   * so you can configure minification for JS and CSS separately.
+   * @default 'esbuild'
+   */
+  cssMinify?: boolean | 'esbuild' | 'lightningcss'
+  /**
+   * If `true`, a separate sourcemap file will be created. If 'inline', the
+   * sourcemap will be appended to the resulting output file as data URI.
+   * 'hidden' works like `true` except that the corresponding sourcemap
+   * comments in the bundled files are suppressed.
+   * @default false
+   */
+  sourcemap?: boolean | 'inline' | 'hidden'
+  /**
+   * Set to `false` to disable minification, or specify the minifier to use.
+   * Available options are 'terser' or 'esbuild'.
+   * @default 'esbuild'
+   */
+  minify?: boolean | 'terser' | 'esbuild'
+  /**
+   * Options for terser
+   * https://terser.org/docs/api-reference#minify-options
+   */
+  terserOptions?: Terser.MinifyOptions
+
+  /**
+   * Will be merged with internal rollup options.
+   * https://rollupjs.org/configuration-options/
+   */
+  rollupOptions?: RollupOptions
+
+  /**
+   * Options to pass on to `@rollup/plugin-commonjs`
+   */
+  commonjsOptions?: RollupCommonJSOptions
+
+  /**
+   * Options to pass on to `@rollup/plugin-dynamic-import-vars`
+   */
+  dynamicImportVarsOptions?: RollupDynamicImportVariablesOptions
+
+  /**
+   * Whether to write bundle to disk
+   * @default true
+   */
+  write?: boolean
+  /**
+   * Empty outDir on write.
+   * @default true when outDir is a sub directory of project root
+   */
+  emptyOutDir?: boolean | null
+  /**
+   * Copy the public directory to outDir on write.
+   * @default true
+   * @experimental
+   */
+  copyPublicDir?: boolean
+  /**
+   * Whether to emit a manifest.json under assets dir to map hash-less filenames
+   * to their hashed versions. Useful when you want to generate your own HTML
+   * instead of using the one generated by Vite.
+   *
+   * Example:
+   *
+   * ```json
+   * {
+   *   "main.js": {
+   *     "file": "main.68fe3fad.js",
+   *     "css": "main.e6b63442.css",
+   *     "imports": [...],
+   *     "dynamicImports": [...]
+   *   }
+   * }
+   * ```
+   * @default false
+   */
+  manifest?: boolean | string
+  /**
+   * Build in library mode. The value should be the global name of the lib in
+   * UMD mode. This will produce esm + cjs + umd bundle formats with default
+   * configurations that are suitable for distributing libraries.
+   * @default false
+   */
+  lib?: LibraryOptions | false
+  /**
+   * Produce SSR oriented build. Note this requires specifying SSR entry via
+   * `rollupOptions.input`.
+   * @default false
+   */
+  ssr?: boolean | string
+  /**
+   * Generate SSR manifest for determining style links and asset preload
+   * directives in production.
+   * @default false
+   */
+  ssrManifest?: boolean | string
+  /**
+   * Emit assets during SSR.
+   * @experimental
+   * @default false
+   */
+  ssrEmitAssets?: boolean
+  /**
+   * Set to false to disable reporting compressed chunk sizes.
+   * Can slightly improve build speed.
+   * @default true
+   */
+  reportCompressedSize?: boolean
+  /**
+   * Adjust chunk size warning limit (in kbs).
+   * @default 500
+   */
+  chunkSizeWarningLimit?: number
+  /**
+   * Rollup watch options
+   * https://rollupjs.org/configuration-options/#watch
+   * @default null
+   */
+  watch?: WatcherOptions | null
+}
+
+export interface LibraryOptions {
+  /**
+   * Path of library entry
+   */
+  entry: InputOption
+  /**
+   * The name of the exposed global variable. Required when the `formats` option includes
+   * `umd` or `iife`
+   */
+  name?: string
+  /**
+   * Output bundle formats
+   * @default ['es', 'umd']
+   */
+  formats?: LibraryFormats[]
+  /**
+   * The name of the package file output. The default file name is the name option
+   * of the project package.json. It can also be defined as a function taking the
+   * format as an argument.
+   */
+  fileName?: string | ((format: ModuleFormat, entryName: string) => string)
+}
+
+export type LibraryFormats = 'es' | 'cjs' | 'umd' | 'iife'
+
+export interface ModulePreloadOptions {
+  /**
+   * Whether to inject a module preload polyfill.
+   *
+   * Note: does not apply to library mode.
+   *
+   * @default true
+   */
+  polyfill?: boolean
+
+  /**
+   * Resolve the list of dependencies to preload for a given dynamic import
+   *
+   * @experimental
+   */
+  resolveDependencies?: ResolveModulePreloadDependenciesFn
+}
+
+export interface ResolvedBuildOptions
+  extends Required<Omit<BuildOptions, 'polyfillModulePreload'>> {
+  modulePreload: false | ResolvedModulePreloadOptions
+}
+
+export interface ResolvedModulePreloadOptions {
+  polyfill: boolean
+  resolveDependencies?: ResolveModulePreloadDependenciesFn
+}
+
+export type ResolveModulePreloadDependenciesFn = (
+  filename: string,
+  deps: string[],
+  context: {
+    hostId: string
+    hostType: 'html' | 'js'
+  },
+) => string[]
+
+export function resolveBuildOptions(
+  raw: BuildOptions | undefined,
+  logger: Logger,
+  root: string,
+): ResolvedBuildOptions {
+  const deprecatedPolyfillModulePreload = raw?.polyfillModulePreload
+
+  if (raw) {
+    const { polyfillModulePreload, ...rest } = raw
+    raw = rest
+    if (deprecatedPolyfillModulePreload !== undefined) {
+      logger.warn('polyfillModulePreload is deprecated. Use modulePreload.polyfill instead.')
+    }
+    if (deprecatedPolyfillModulePreload === false && raw.modulePreload === undefined) {
+      raw.modulePreload = { polyfill: false }
+    }
+  }
+
+  const modulePreload = raw?.modulePreload
+  const defaultModulePreload = {
+    polyfill: true,
+  }
+
+  const defaultBuildOptions: BuildOptions = {
+    outDir: 'dist',
+    assetsDir: 'assets',
+    assetsInlineLimit: 4096,
+    cssCodeSplit: !raw?.lib,
+    sourcemap: false,
+    rollupOptions: {},
+    minify: raw?.ssr ? false : 'esbuild',
+    terserOptions: {},
+    write: true,
+    emptyOutDir: null,
+    copyPublicDir: true,
+    manifest: false,
+    lib: false,
+    ssr: false,
+    ssrManifest: false,
+    ssrEmitAssets: false,
+    reportCompressedSize: true,
+    chunkSizeWarningLimit: 500,
+    watch: null,
+  }
+
+  const userBuildOptions = raw ? mergeConfig(defaultBuildOptions, raw) : defaultBuildOptions
+
+  // @ts-expect-error Fallback options instead of merging
+  const resolved: ResolvedBuildOptions = {
+    target: 'modules',
+    cssTarget: false,
+    ...userBuildOptions,
+    commonjsOptions: {
+      include: [/node_modules/],
+      extensions: ['.js', '.cjs'],
+      ...userBuildOptions.commonjsOptions,
+    },
+    dynamicImportVarsOptions: {
+      warnOnError: true,
+      exclude: [/node_modules/],
+      ...userBuildOptions.dynamicImportVarsOptions,
+    },
+    // Resolve to false | object
+    modulePreload:
+      modulePreload === false
+        ? false
+        : typeof modulePreload === 'object'
+        ? {
+            ...defaultModulePreload,
+            ...modulePreload,
+          }
+        : defaultModulePreload,
+  }
+
+  // handle special build targets
+  if (resolved.target === 'modules') {
+    resolved.target = ESBUILD_MODULES_TARGET
+  } else if (resolved.target === 'esnext' && resolved.minify === 'terser') {
+    try {
+      const terserPackageJsonPath = requireResolveFromRootWithFallback(root, 'terser/package.json')
+      const terserPackageJson = JSON.parse(fs.readFileSync(terserPackageJsonPath, 'utf-8'))
+      const v = terserPackageJson.version.split('.')
+      if (v[0] === '5' && v[1] < 16) {
+        // esnext + terser 5.16<: limit to es2021 so it can be minified by terser
+        resolved.target = 'es2021'
+      }
+    } catch {}
+  }
+
+  if (!resolved.cssTarget) {
+    resolved.cssTarget = resolved.target
+  }
+
+  // normalize false string into actual false
+  if ((resolved.minify as string) === 'false') {
+    resolved.minify = false
+  }
+
+  if (resolved.minify === true) {
+    resolved.minify = 'esbuild'
+  }
+
+  if (resolved.cssMinify == null) {
+    resolved.cssMinify = !!resolved.minify
+  }
+
+  return resolved
 }
