@@ -1,7 +1,7 @@
 import os from 'node:os'
 import fs from 'node:fs'
 import path from 'node:path'
-import url from 'node:url'
+// import url from 'node:url'
 import crypto from 'node:crypto'
 import { promises as dns } from 'node:dns'
 import { exec } from 'node:child_process'
@@ -9,9 +9,9 @@ import { builtinModules, createRequire } from 'node:module'
 import picocolors from 'picocolors'
 import debug from 'debug'
 import type { FSWatcher } from 'chokidar'
-import type MagicString from 'magic-string'
+// import type MagicString from 'magic-string'
 import type { BuildOptions } from 'esbuild'
-import type { TransformResult } from 'rollup'
+// import type { TransformResult } from 'rollup'
 import { createFilter, type FilterPattern } from '@rollup/pluginutils'
 import type { Alias } from '@rollup/plugin-alias'
 import {
@@ -27,7 +27,6 @@ import {
 import type { DecodedSourceMap, RawSourceMap } from '@ampproject/remapping'
 import remapping from '@ampproject/remapping'
 import type { ResolvedServerUrls } from './logger.js'
-import { resolvePackageData } from './packages.js'
 
 /**
  * Specifies an `Object`, or an `Array` of `Object`,
@@ -1012,7 +1011,7 @@ const windowsPrefix = '/windows/'
 
 const linuxPrefix = '/linux'
 
-function toUnixPath(path: string): string {
+export function toUnixPath(path: string): string {
   if (windowsDriveRegex.test(path)) {
     return path.replace(replaceWindowsDriveRegex, `${windowsPrefix}$1`)
   }
@@ -1026,7 +1025,7 @@ function toUnixPath(path: string): string {
 
 const revertWindowsDriveRegex = /^\/windows\/([A-Z])\//
 
-function fromUnixPath(path: string): string {
+export function fromUnixPath(path: string): string {
   if (path.startsWith(`${linuxPrefix}/`)) {
     return path.slice(linuxPrefix.length)
   }
@@ -1246,23 +1245,25 @@ export function getHash(text: Buffer | string): string {
   return crypto.createHash('sha256').update(text).digest('hex').substring(0, 8)
 }
 
-const _dirname = path.dirname(url.fileURLToPath(import.meta.url))
-
-export const requireResolveFromRootWithFallback = (root: string, id: string): string => {
-  // check existence first, so if the package is not found,
-  // it won't be cached by nodejs, since there isn't a way to invalidate them:
-  // https://github.com/nodejs/node/issues/44663
-  const found = resolvePackageData(id, root) || resolvePackageData(id, _dirname)
-  if (!found) {
-    const error = new Error(`${JSON.stringify(id)} not found.`)
-    ;(error as any).code = 'MODULE_NOT_FOUND'
-    throw error
-  }
-
-  // actually resolve
-  // Search in the root directory first, and fallback to the default require paths.
-  return _require.resolve(id, { paths: [root, _dirname] })
-}
+/**
+ * TODO
+ */
+// const _dirname = path.dirname(url.fileURLToPath(import.meta.url))
+// export const requireResolveFromRootWithFallback = (root: string, id: string): string => {
+//   // check existence first, so if the package is not found,
+//   // it won't be cached by nodejs, since there isn't a way to invalidate them:
+//   // https://github.com/nodejs/node/issues/44663
+//   const found = resolvePackageData(id, root) || resolvePackageData(id, _dirname)
+//   if (!found) {
+//     const error = new Error(`${JSON.stringify(id)} not found.`)
+//     ;(error as any).code = 'MODULE_NOT_FOUND'
+//     throw error
+//   }
+//
+//   // actually resolve
+//   // Search in the root directory first, and fallback to the default require paths.
+//   return _require.resolve(id, { paths: [root, _dirname] })
+// }
 
 export function emptyCssComments(raw: string): string {
   return raw.replace(multilineCommentsRegex, (s) => ' '.repeat(s.length))
@@ -1391,11 +1392,11 @@ function normalizeSingleAlias(alias: Alias): Alias {
  *
  * TODO
  */
-export function transformStableResult(
-  string: MagicString,
-  id: string,
-  config: any,
-): TransformResult {}
+// export function transformStableResult(
+//   string: MagicString,
+//   id: string,
+//   config: any,
+// ): TransformResult {}
 
 /**
  * Flattens an array of (possible) promises.

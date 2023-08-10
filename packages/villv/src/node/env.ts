@@ -2,55 +2,45 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { parse } from 'dotenv'
 import { expand } from 'dotenv-expand'
-import { toArray, tryStatSync } from './utils.js'
-import type { UserConfig } from './config.js'
 import { ENV_PREFIX } from './constants.js'
+import { toArray, tryStatSync } from './utils.js'
 
-const defaultEnvFile = '.env'
+const DEFAULT_ENV_FILE = '.env'
 
-const defaultLocalEnvFile = '.env.local'
+const DEFAULT_LOCAL_ENV_FILE = '.env.local'
 
 export function loadEnv(
   mode: string,
-  envDirectory: string,
+  directory: string,
   prefixes: string | string[] = ENV_PREFIX,
-) {
+): Record<string, string> {
   if (mode === 'local') {
     throw new Error(
       `"local" cannot be used as a mode name because it conflicts with the .local postfix for .env files.`,
     )
   }
 
-  const prefixArray = toArray(prefixes)
-
-  const env: Record<PropertyKey, string> = {}
-
   const envFiles = [
-    defaultEnvFile,
-    defaultLocalEnvFile,
-    `${defaultEnvFile}.${mode}` /** mode file */,
-    `${defaultLocalEnvFile}.${mode}.local` /** mode local file */,
+    DEFAULT_ENV_FILE,
+    DEFAULT_LOCAL_ENV_FILE,
+    `${DEFAULT_ENV_FILE}.${mode}` /** mode file */,
+    `${DEFAULT_LOCAL_ENV_FILE}.${mode}.local` /** mode local file */,
   ]
 
   const parsed = Object.fromEntries(
-    envFiles.flatMap((file) => {
-      const filePath = path.join(envDirectory, file)
-      return !tryStatSync(filePath)?.isFile()
-        ? []
-        : Object.entries(parse(fs.readFileSync(filePath)))
-    }),
+    envFiles
+      .flatMap((file) => path.join(directory, file))
+      .flatMap((filePath) =>
+        !tryStatSync(filePath)?.isFile() ? [] : Object.entries(parse(fs.readFileSync(filePath))),
+      ),
   )
 
-  /**
-   * Test NODE_ENV override before expand as otherwise process.env.NODE_ENV would override this.
-   */
+  // Test NODE_ENV override before expand as otherwise process.env.NODE_ENV would override this.
   if (parsed['NODE_ENV'] && process.env['VITE_USER_NODE_ENV'] === undefined) {
     process.env['VITE_USER_NODE_ENV'] = parsed['NODE_ENV']
   }
 
-  /**
-   * Support BROWSER and BROWSER_ARGS env variables.
-   */
+  //  Support BROWSER and BROWSER_ARGS env variables.
   if (parsed['BROWSER'] && process.env['BROWSER'] === undefined) {
     process.env['BROWSER'] = parsed['BROWSER']
   }
@@ -59,30 +49,21 @@ export function loadEnv(
     process.env['BROWSER_ARGS'] = parsed['BROWSER_ARGS']
   }
 
-  /**
-   * Let environment variables use each other.
-   * `expand` patched in patches/dotenv-expand@9.0.0.patch
-   */
+  // Let environment variables use each other.
+  // `expand` patched in patches/dotenv-expand@9.0.0.patch
   expand({ parsed })
 
-  /**
-   * Only expose environment variables that start with the designated prefix.
-   */
-  Object.entries(parsed).forEach(([key, value]) => {
-    if (prefixArray.some((prefix) => key.startsWith(prefix))) {
-      env[key] = value
-    }
-  })
+  const prefixArray = toArray(prefixes)
 
-  /**
-   * Check if there are actual env variables starting with the designated prefix.
-   * These are typically provided inline and should have higher priority.
-   */
-  Object.entries(process.env).forEach(([key, value]) => {
-    if (prefixArray.some((prefix) => key.startsWith(prefix)) && value != null) {
-      env[key] = value
-    }
-  })
+  const env = Array.from([...Object.entries(parsed), ...Object.entries(process.env)]).reduce(
+    (currentEnv, [key, value]) => {
+      if (prefixArray.some((prefix) => key.startsWith(prefix)) && value != null) {
+        currentEnv[key] = value
+      }
+      return currentEnv
+    },
+    {} as Record<string, string>,
+  )
 
   return env
 }
@@ -90,14 +71,14 @@ export function loadEnv(
 /**
  * Determine the env prefix, and warn if unsafe.
  */
-export function resolveEnvPrefix(config: UserConfig): string[] {
-  const envPrefix = toArray(config.envPrefix)
+export function resolveEnvPrefixes(envPrefix: string | string[]): string[] {
+  const envPrefixes = toArray(envPrefix)
 
-  if (envPrefix.some((prefix) => prefix === '')) {
+  if (envPrefixes.some((prefix) => prefix === '')) {
     throw new Error(
       `envPrefix option contains value '', which could lead unexpected exposure of sensitive information.`,
     )
   }
 
-  return envPrefix
+  return envPrefixes
 }
