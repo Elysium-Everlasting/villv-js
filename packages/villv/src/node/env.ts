@@ -82,3 +82,15 @@ export function resolveEnvPrefixes(envPrefix: string | string[]): string[] {
 
   return envPrefixes
 }
+
+export function resolveEnvPrefix(envPrefix: string | string[] = 'VITE_'): string[] {
+  const envPrefixArray = toArray(envPrefix)
+
+  if (envPrefixArray.some((prefix) => prefix === '')) {
+    throw new Error(
+      `envPrefix option contains value '', which could lead unexpected exposure of sensitive information.`,
+    )
+  }
+
+  return envPrefixArray
+}

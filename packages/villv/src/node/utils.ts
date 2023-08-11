@@ -13,7 +13,7 @@ import type { FSWatcher } from 'chokidar'
 import type { BuildOptions } from 'esbuild'
 // import type { TransformResult } from 'rollup'
 import { createFilter, type FilterPattern } from '@rollup/pluginutils'
-import type { Alias } from '@rollup/plugin-alias'
+import type { Alias, RollupAliasOptions } from '@rollup/plugin-alias'
 import {
   CLIENT_ENTRY,
   CLIENT_PUBLIC_PATH,
@@ -27,20 +27,6 @@ import {
 import type { DecodedSourceMap, RawSourceMap } from '@ampproject/remapping'
 import remapping from '@ampproject/remapping'
 import type { ResolvedServerUrls } from './logger.js'
-
-/**
- * Specifies an `Object`, or an `Array` of `Object`,
- * which defines aliases used to replace values in `import` or `require` statements.
- *
- * With either format, the order of the entries is important,
- * in that the first defined rules are applied first.
- *
- * This is passed to \@rollup/plugin-alias as the "entries" field
- * @see https://github.com/rollup/plugins/tree/master/packages/alias#entries
- *
- * TODO: move this somewhere else.
- */
-export type AliasOptions = readonly Alias[] | { [find: string]: string }
 
 /**
  * TODO: move this somewhere else too.
@@ -1333,14 +1319,17 @@ export function mergeConfig<
   defaults: Defaults extends Function ? never : Defaults,
   overrides: Overrides extends Function ? never : Overrides,
   isRoot = true,
-) {
+): Defaults & Overrides {
   if (typeof defaults === 'function' || typeof overrides === 'function') {
     throw new Error(`Cannot merge config in form of callback`)
   }
   return mergeConfigRecursively(defaults, overrides, isRoot ? '' : '.')
 }
 
-export function mergeAlias(left?: AliasOptions, right?: AliasOptions): AliasOptions | undefined {
+export function mergeAlias(
+  left?: RollupAliasOptions['entries'],
+  right?: RollupAliasOptions['entries'],
+): RollupAliasOptions['entries'] | undefined {
   if (!left || !right) {
     return left || right
   }
@@ -1359,7 +1348,7 @@ export function mergeAlias(left?: AliasOptions, right?: AliasOptions): AliasOpti
 /**
  * Idk.
  */
-export function normalizeAlias(options: AliasOptions = []): Alias[] {
+export function normalizeAlias(options: RollupAliasOptions['entries'] = []): Alias[] {
   return Array.isArray(options)
     ? options.map(normalizeSingleAlias)
     : Object.entries(options).map(([find, replacement]) =>
