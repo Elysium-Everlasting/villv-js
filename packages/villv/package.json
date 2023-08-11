@@ -56,11 +56,15 @@
     "fast-glob": "^3.3.1",
     "magic-string": "^0.30.2",
     "picocolors": "^1.0.0",
+    "postcss-modules": "^6.0.0",
     "rollup": "^3.27.2",
     "terser": "^5.19.2"
   },
   "devDependencies": {
+    "@types/cors": "^2.8.13",
     "@types/debug": "^4.1.8",
-    "@types/pnpapi": "^0.0.2"
+    "@types/http-proxy": "^1.17.11",
+    "@types/pnpapi": "^0.0.2",
+    "postcss": "^8.4.27"
   }
 }

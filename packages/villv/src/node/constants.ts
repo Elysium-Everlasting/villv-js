@@ -3,7 +3,7 @@ import { version } from '../../package.json'
 import { getClosestProjectDirectory } from '../utils/project.js'
 
 /**
- * Forward the version from this project's package.json
+ * Forward the version from this project's package.json .
  *
  * Set during build time.
  */
@@ -30,9 +30,7 @@ export const DEFAULT_MAIN_FIELDS = [
 ] as const
 
 /**
- * Baseline support browserslist.
- *
- * Higher browser versions may be needed for newer features.
+ * Baseline support browserslist. Higher browser versions may be needed for newer features.
  *
  * "defaults and supports es6-module and supports es6-module-dynamic-import"
  */
