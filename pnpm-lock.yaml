@@ -46,9 +46,6 @@ importers:
       commitizen:
         specifier: ^4.3.0
         version: 4.3.0
-      commitlint-config-gitmoji:
-        specifier: ^2.3.1
-        version: 2.3.1
       cz-conventional-changelog:
         specifier: ^3.3.0
         version: 3.3.0
@@ -1541,32 +1538,6 @@ packages:
         integrity: sha512-a8TLtmPi8xzPkCbp/OGFUo5yhRkHM2Ko9kOWP4znJr0WAhWyThaw3PnwX4vOTWOAMsV2uRt32PPDcEz63esSaA==,
       }
     engines: { node: ^12.22.0 || ^14.17.0 || >=16.0.0 }
-    dev: true
-
-  /@gitmoji/commit-types@1.1.5:
-    resolution:
-      {
-        integrity: sha512-8D3FZMRY+gtYpTcHG1SOGmm9CFqxNh6rI9xDoCydxHxnWgqInbdF3nk9gibW5gXA58Hf2cVcJaLEcGOKLRAtmw==,
-      }
-    dev: true
-
-  /@gitmoji/gitmoji-regex@1.0.0:
-    resolution:
-      {
-        integrity: sha512-+BFXxcWCxn0UIYuG1v5n9SfaCCS8tw95j1x3QsTJRdGGiihRyVLTHiu1wrHlzH3z4nYXKjCKiZFTdWwMjRI+gQ==,
-      }
-    dependencies:
-      emoji-regex: 10.2.1
-      gitmojis: 3.13.5
-    dev: true
-
-  /@gitmoji/parser-opts@1.4.0:
-    resolution:
-      {
-        integrity: sha512-zzmx/vtpdB/ijjUm7u9OzHNCXWKpSbzVEgVzOzhilMgoTBlUDyInZFUtiCTV+Wf4oCP9nxGa/kQGQFfN+XLH1g==,
-      }
-    dependencies:
-      '@gitmoji/gitmoji-regex': 1.0.0
     dev: true
 
   /@humanwhocodes/config-array@0.11.10:
@@ -3187,29 +3158,6 @@ packages:
       - '@swc/wasm'
     dev: true
 
-  /commitlint-config-gitmoji@2.3.1:
-    resolution:
-      {
-        integrity: sha512-T15ssbsyNc6szHlnGWo0/xvIA1mObqM70E9TwKNVTpksxhm+OdFht8hvDdKJAVi4nlZX5tcfTeILOi7SHBGH3w==,
-      }
-    dependencies:
-      '@commitlint/types': 17.4.4
-      '@gitmoji/commit-types': 1.1.5
-      '@gitmoji/parser-opts': 1.4.0
-      commitlint-plugin-gitmoji: 2.2.6
-    dev: true
-
-  /commitlint-plugin-gitmoji@2.2.6:
-    resolution:
-      {
-        integrity: sha512-oKHPHeNXby0Ix0ZbHVSK5ZyPx1V4fyBjLOy93cYwXhOEPXe36nkDc/HDPFfQpzx1vz39277TaP9LScbqTbscfQ==,
-      }
-    dependencies:
-      '@commitlint/types': 17.4.4
-      '@gitmoji/gitmoji-regex': 1.0.0
-      gitmojis: 3.13.5
-    dev: true
-
   /commondir@1.0.1:
     resolution:
       {
@@ -3601,13 +3549,6 @@ packages:
     resolution:
       {
         integrity: sha512-I88TYZWc9XiYHRQ4/3c5rjjfgkjhLyW2luGIheGERbNQ6OY7yTybanSpDXZa8y7VUP9YmDcYa+eyq4ca7iLqWA==,
-      }
-    dev: true
-
-  /emoji-regex@10.2.1:
-    resolution:
-      {
-        integrity: sha512-97g6QgOk8zlDRdgq1WxwgTMgEWGVAQvB5Fdpgc1MkNy56la5SKP9GsMXKDOdqwn90/41a8yPwIGk1Y6WVbeMQA==,
       }
     dev: true
 
@@ -4354,13 +4295,6 @@ packages:
       meow: 8.1.2
       split2: 3.2.2
       through2: 4.0.2
-    dev: true
-
-  /gitmojis@3.13.5:
-    resolution:
-      {
-        integrity: sha512-MLM88QAaWpYWlvtBjHBxshI9AGRH+LLluD6NbhymeWp0EQ1Sew8SgC0BpiQuQ4DCYGKs9LcX4zRL3lDlwOPA5g==,
-      }
     dev: true
 
   /glob-parent@5.1.2:
