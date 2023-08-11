@@ -55,8 +55,10 @@
     "esbuild": "^0.19.0",
     "fast-glob": "^3.3.1",
     "magic-string": "^0.30.2",
+    "mlly": "^1.4.0",
     "picocolors": "^1.0.0",
     "postcss-modules": "^6.0.0",
+    "resolve.exports": "^2.0.2",
     "rollup": "^3.27.2",
     "terser": "^5.19.2"
   },

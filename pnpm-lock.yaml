@@ -121,12 +121,18 @@ importers:
       magic-string:
         specifier: ^0.30.2
         version: 0.30.2
+      mlly:
+        specifier: ^1.4.0
+        version: 1.4.0
       picocolors:
         specifier: ^1.0.0
         version: 1.0.0
       postcss-modules:
         specifier: ^6.0.0
         version: 6.0.0(postcss@8.4.27)
+      resolve.exports:
+        specifier: ^2.0.2
+        version: 2.0.2
       rollup:
         specifier: ^3.27.2
         version: 3.27.2
@@ -5105,7 +5111,6 @@ packages:
       {
         integrity: sha512-gfFQZrcTc8CnKXp6Y4/CBT3fTc0OVuDofpre4aEeEpSBPV5X5v4+Vmx+8snU7RLPrNHPKSgLxGo9YuQzz20o+w==,
       }
-    dev: true
 
   /jsonfile@4.0.0:
     resolution:
@@ -5647,7 +5652,6 @@ packages:
       pathe: 1.1.1
       pkg-types: 1.0.3
       ufo: 1.2.0
-    dev: true
 
   /ms@2.1.2:
     resolution:
@@ -6009,7 +6013,6 @@ packages:
       {
         integrity: sha512-d+RQGp0MAYTIaDBIMmOfMwz3E+LOZnxx1HZd5R18mmCZY0QBlK0LDZfPc8FW8Ed2DlvsuE6PRjroDY+wg4+j/Q==,
       }
-    dev: true
 
   /pathval@1.1.1:
     resolution:
@@ -6067,7 +6070,6 @@ packages:
       jsonc-parser: 3.2.0
       mlly: 1.4.0
       pathe: 1.1.1
-    dev: true
 
   /postcss-modules-extract-imports@3.0.0(postcss@8.4.27):
     resolution:
@@ -6422,6 +6424,14 @@ packages:
     dependencies:
       global-dirs: 0.1.1
     dev: true
+
+  /resolve.exports@2.0.2:
+    resolution:
+      {
+        integrity: sha512-X2UW6Nw3n/aMgDVy+0rSqgHlv39WZAlZrXCdnbyEiKm17DSqHX4MmQMaST3FbeWR5FTuRcUwYAziZajji0Y7mg==,
+      }
+    engines: { node: '>=10' }
+    dev: false
 
   /resolve@1.22.4:
     resolution:
@@ -7437,7 +7447,6 @@ packages:
       {
         integrity: sha512-RsPyTbqORDNDxqAdQPQBpgqhWle1VcTSou/FraClYlHf6TZnQcGslpLcAphNR+sQW4q5lLWLbOsRlh9j24baQg==,
       }
-    dev: true
 
   /unbox-primitive@1.0.2:
     resolution:
