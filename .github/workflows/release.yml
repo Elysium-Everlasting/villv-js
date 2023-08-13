@@ -1,4 +1,6 @@
-name: Release Packages
+# yaml-language-server: $schema=https://raw.githubusercontent.com/SchemaStore/schemastore/master/src/schemas/json/github-workflow.json
+---
+name: Release packages
 
 on:
   push:
@@ -9,12 +11,17 @@ concurrency: ${{ github.workflow }}-${{ github.ref }}
 
 jobs:
   release:
+    name: Release packages
+
+    runs-on: ubuntu-latest
+
     permissions:
       contents: write
       pull-requests: write
 
-    name: Release
-    runs-on: ubuntu-latest
+    env:
+      RAW_COMMIT_MESSAGE: 'chore: release package(s)'
+
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v3
@@ -33,26 +40,30 @@ jobs:
       - name: Get pnpm store directory
         id: pnpm-cache
         shell: bash
-        run: |
-          echo "STORE_PATH=$(pnpm store path)" >> $GITHUB_OUTPUT
+        run: echo "STORE_PATH=$(pnpm store path)" >> $GITHUB_OUTPUT
 
       - name: Setup pnpm cache
         uses: actions/cache@v3
         with:
           path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
           key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-
+          restore-keys: ${{ runner.os }}-pnpm-store-
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Create Release Pull Request or Publish to npm
+      - name: Generate commit message
+        id: devmoji
+        run: |
+          MESSAGE=$(npx --no -- devmoji --format shortcode --text ${{ toJSON(RAW_COMMIT_MESSAGE) }})
+          echo "MESSAGE=$MESSAGE" >> $GITHUB_OUTPUT
+
+      - name: Create release pull request or publish to npm
         uses: changesets/action@v1
         with:
           publish: pnpm release
-          commit: 'chore: release package(s)'
-          title: 'chore: release package(s)'
+          commit: ${{ steps.devmoji.outputs.MESSAGE }}
+          title: ${{ steps.devmoji.outputs.MESSAGE }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
