@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   validate:
-    name: Validate pull request contents and update if needed
+    name: Validate pull request contents
 
     runs-on: ubuntu-latest
 
