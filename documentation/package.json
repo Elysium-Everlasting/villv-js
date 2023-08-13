@@ -21,6 +21,7 @@
   "bugs": {
     "url": "https://github.com/ap0nia/vite/issues"
   },
+  "type": "module",
   "scripts": {
     "dev": "vitepress dev src/routes",
     "build": "vitepress build src/routes",
