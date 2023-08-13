@@ -30,7 +30,7 @@
     "ci-info": "^3.8.0",
     "vitepress": "1.0.0-rc.4"
   },
-  "packageManager": "pnpm@8.6.11",
+  "packageManager": "pnpm@8.6.12",
   "engines": {
     "pnpm": "^8.0.0",
     "node": ">=18"
