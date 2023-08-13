@@ -1,5 +1,5 @@
 {
-  "name": "@villv-js/monorepo",
+  "name": "@villv.js/monorepo",
   "version": "0.0.0",
   "description": "monorepo for villv-JS - next generation frontend tooling",
   "private": true,

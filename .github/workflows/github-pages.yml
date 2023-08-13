@@ -55,7 +55,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build Documentation
-        run: pnpm --filter @villv-js/documentation build
+        run: pnpm --filter @villv.js/documentation build
 
       - name: Upload Artifacts
         uses: actions/upload-pages-artifact@v2

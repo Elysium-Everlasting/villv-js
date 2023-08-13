@@ -1,5 +1,5 @@
 {
-  "name": "@villv-js/villv",
+  "name": "@villv.js/villv",
   "version": "0.1.1",
   "description": "Native-ESM powered web dev build tool",
   "private": true,
