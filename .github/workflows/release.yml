@@ -55,7 +55,7 @@ jobs:
       - name: Generate commit message
         id: devmoji
         run: |
-          MESSAGE=$(npx --no -- devmoji --format shortcode --text ${{ toJSON(RAW_COMMIT_MESSAGE) }})
+          MESSAGE=$(npx --no -- devmoji --format shortcode --text ${{ toJSON(env.RAW_COMMIT_MESSAGE) }})
           echo "MESSAGE=$MESSAGE" >> $GITHUB_OUTPUT
 
       - name: Create release pull request or publish to npm
