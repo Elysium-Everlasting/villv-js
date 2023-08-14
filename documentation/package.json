@@ -4,8 +4,8 @@
   "description": "villv JS documentation",
   "private": true,
   "license": "MIT",
-  "homepage": "https://github.com/Elysium-Everlasting/villv-js",
-  "funding": "https://github.com/Elysium-Everlasting/villv-js",
+  "homepage": "https://github.com/Elysium-Everlasting/villv.js",
+  "funding": "https://github.com/Elysium-Everlasting/villv.js",
   "contributors": [
     {
       "name": "ap0nia",
@@ -15,7 +15,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/Elysium-Everlasting/villv-js",
+    "url": "https://github.com/Elysium-Everlasting/villv.js",
     "directory": "documentation"
   },
   "bugs": {
