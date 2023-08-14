@@ -522,15 +522,15 @@ export async function resolveConfig(
   mode = inlineConfig.mode || config.mode || mode
   configEnv.mode = mode
 
-  const filterPlugin = (p: Plugin) => {
-    if (!p) {
+  const filterPlugin = (plugin: Plugin) => {
+    if (!plugin) {
       return false
-    } else if (!p.apply) {
+    } else if (!plugin.apply) {
       return true
-    } else if (typeof p.apply === 'function') {
-      return p.apply({ ...config, mode }, configEnv)
+    } else if (typeof plugin.apply === 'function') {
+      return plugin.apply({ ...config, mode }, configEnv)
     } else {
-      return p.apply === command
+      return plugin.apply === command
     }
   }
 
@@ -644,7 +644,7 @@ export async function resolveConfig(
   const resolvedBuildOptions = resolveBuildOptions(config.build, logger, resolvedRoot)
 
   // resolve cache directory
-  const pkgDir = findNearestPackageData(resolvedRoot, packageCache)?.dir
+  const pkgDir = findNearestPackageData(resolvedRoot, packageCache)?.directory
 
   const cacheDir = normalizePath(
     config.cacheDirectory
