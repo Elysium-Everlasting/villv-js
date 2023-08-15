@@ -1,7 +1,9 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import acorn from 'acorn'
+import postcss from 'postcss'
 import colors from 'picocolors'
+import MagicString from 'magic-string'
 import { VERSION as rollupVersion } from 'rollup'
 import type {
   AsyncPluginHooks,
@@ -23,11 +25,15 @@ import type {
   ModuleOptions,
   RollupLog,
   RollupError,
+  EmittedFile,
 } from 'rollup'
+import { TraceMap, originalPositionFor } from '@jridgewell/trace-mapping'
 import type { Plugin } from '../plugin.js'
 import type { FSWatcher } from 'chokidar'
 import type { ResolvedConfig } from '../config.js'
 import {
+  cleanUrl,
+  combineSourceMaps,
   createDebugger,
   ensureWatchedFile,
   formatUrl,
@@ -36,12 +42,52 @@ import {
   isObject,
   normalizePath,
   numberToPosition,
+  pad,
   timeFrom,
   toArray,
   unwrapId,
 } from '../utils.js'
 import { createPluginHookUtils } from '../plugins/index.js'
 import { FS_PREFIX } from '../constants.js'
+import type { RawSourceMap } from '@ampproject/remapping'
+
+function cleanStack(stack: string) {
+  return stack
+    .split(/\n/g)
+    .filter((l) => /^\s*at/.test(l))
+    .join('\n')
+}
+
+/**
+ * TODO: this was in src/node/middlewares/error.ts
+ */
+export function buildErrorMessage(
+  err: RollupError,
+  args: string[] = [],
+  includeStack = true,
+): string {
+  const errorMessageLines = [...args]
+
+  if (err.plugin) {
+    errorMessageLines.push(`  Plugin: ${colors.magenta(err.plugin)}`)
+  }
+
+  const loc = err.loc ? `:${err.loc.line}:${err.loc.column}` : ''
+
+  if (err.id) {
+    errorMessageLines.push(`  File: ${colors.cyan(err.id)}${loc}`)
+  }
+
+  if (err.frame) {
+    errorMessageLines.push(colors.yellow(pad(err.frame)))
+  }
+
+  if (includeStack && err.stack) {
+    errorMessageLines.push(pad(cleanStack(err.stack)))
+  }
+
+  return errorMessageLines.join('\n')
+}
 
 type PluginContext = Omit<
   RollupPluginContext,
@@ -50,262 +96,6 @@ type PluginContext = Omit<
   // deprecated
   | 'moduleIds'
 >
-
-// we should create a new context for each async hook pipeline so that the
-// active plugin in that pipeline can be tracked in a concurrency-safe manner.
-// using a class to make creating new contexts more efficient
-class Context implements PluginContext {
-  meta
-  ssr = false
-  _scan = false
-  _activePlugin: Plugin | null
-  _activeId: string | null = null
-  _activeCode: string | null = null
-  _resolveSkips?: Set<Plugin>
-  _addedImports: Set<string> | null = null
-
-  constructor(minimalContext: MinimalPluginContext, initialPlugin?: Plugin) {
-    this._activePlugin = initialPlugin || null
-    this.meta = minimalContext.meta
-  }
-
-  parse(code: string, opts: any = {}) {
-    return parser.parse(code, {
-      sourceType: 'module',
-      ecmaVersion: 'latest',
-      locations: true,
-      ...opts,
-    })
-  }
-
-  async resolve(id: string, importer?: string, options?: ResolveIdOptions) {
-    let skip: Set<Plugin> | undefined
-
-    if (options?.skipSelf && this._activePlugin) {
-      skip = new Set(this._resolveSkips)
-      skip.add(this._activePlugin)
-    }
-
-    let out = await container.resolveId(id, importer, {
-      assertions: options?.assertions,
-      custom: options?.custom,
-      isEntry: !!options?.isEntry,
-      skip,
-      ssr: this.ssr,
-      scan: this._scan,
-    })
-
-    if (typeof out === 'string') {
-      out = { id: out }
-    }
-
-    return out as ResolvedId | null
-  }
-
-  async load(
-    options: {
-      id: string
-      resolveDependencies?: boolean
-    } & Partial<PartialNull<ModuleOptions>>,
-  ): Promise<ModuleInfo> {
-    // We may not have added this to our module graph yet, so ensure it exists
-    await moduleGraph?.ensureEntryFromUrl(unwrapId(options.id), this.ssr)
-
-    // Not all options passed to this function make sense in the context of loading individual files,
-    // but we can at least update the module info properties we support
-    updateModuleInfo(options.id, options)
-
-    await container.load(options.id, { ssr: this.ssr })
-
-    const moduleInfo = this.getModuleInfo(options.id)
-
-    // This shouldn't happen due to calling ensureEntryFromUrl, but
-    //
-    // 1) our types can't ensure that and
-    // 2) moduleGraph may not have been provided
-    //   (though in the situations where that happens, we should never have plugins calling this.load)
-    if (!moduleInfo) {
-      throw Error(`Failed to load module with id ${options.id}`)
-    }
-
-    return moduleInfo
-  }
-
-  getModuleInfo(id: string) {
-    return getModuleInfo(id)
-  }
-
-  getModuleIds() {
-    return moduleGraph ? moduleGraph.idToModuleMap.keys() : Array.prototype[Symbol.iterator]()
-  }
-
-  addWatchFile(id: string) {
-    watchFiles.add(id)
-
-    this._addedImports ||= new Set()
-    this._addedImports.add(id)
-
-    if (watcher) {
-      ensureWatchedFile(watcher, id, root)
-    }
-  }
-
-  getWatchFiles() {
-    return [...watchFiles]
-  }
-
-  emitFile(assetOrFile: EmittedFile) {
-    warnIncompatibleMethod(`emitFile`, this._activePlugin!.name)
-    return ''
-  }
-
-  setAssetSource() {
-    warnIncompatibleMethod(`setAssetSource`, this._activePlugin!.name)
-  }
-
-  getFileName() {
-    warnIncompatibleMethod(`getFileName`, this._activePlugin!.name)
-    return ''
-  }
-
-  warn(
-    e: string | RollupLog | (() => string | RollupLog),
-    position?: number | { column: number; line: number },
-  ) {
-    const err = formatError(typeof e === 'function' ? e() : e, position, this)
-
-    const msg = buildErrorMessage(err, [colors.yellow(`warning: ${err.message}`)], false)
-
-    logger.warn(msg, {
-      clear: true,
-      timestamp: true,
-    })
-  }
-
-  error(e: string | RollupError, position?: number | { column: number; line: number }): never {
-    // error thrown here is caught by the transform middleware and passed on
-    // the the error middleware.
-    throw formatError(e, position, this)
-  }
-
-  debug = noop
-  info = noop
-}
-
-function formatError(
-  e: string | RollupError,
-  position: number | { column: number; line: number } | undefined,
-  ctx: Context,
-) {
-  const err = (typeof e === 'string' ? new Error(e) : e) as postcss.CssSyntaxError & RollupError
-
-  if (err.pluginCode) {
-    return err // The plugin likely called `this.error`
-  }
-
-  if (err.file && err.name === 'CssSyntaxError') {
-    err.id = normalizePath(err.file)
-  }
-
-  if (ctx._activePlugin) {
-    err.plugin = ctx._activePlugin.name
-  }
-
-  if (ctx._activeId && !err.id) {
-    err.id = ctx._activeId
-  }
-
-  if (ctx._activeCode) {
-    err.pluginCode = ctx._activeCode
-
-    // some rollup plugins, e.g. json, sets err.position instead of err.pos
-    const pos = position ?? err.pos ?? (err as any).position
-
-    if (pos != null) {
-      let errLocation
-      try {
-        errLocation = numberToPosition(ctx._activeCode, pos)
-      } catch (err2) {
-        logger.error(
-          colors.red(`Error in error handler:\n${err2.stack || err2.message}\n`),
-          // print extra newline to separate the two errors
-          { error: err2 },
-        )
-        throw err
-      }
-
-      err.loc ||= { file: err.id, ...errLocation }
-      err.frame ||= generateCodeFrame(ctx._activeCode, pos)
-    } else if (err.loc) {
-      // css preprocessors may report errors in an included file
-      if (!err.frame) {
-        let code = ctx._activeCode
-
-        if (err.loc.file) {
-          err.id = normalizePath(err.loc.file)
-          try {
-            code = fs.readFileSync(err.loc.file, 'utf-8')
-          } catch {}
-        }
-
-        err.frame = generateCodeFrame(code, err.loc)
-      }
-    } else if ((err as any).line && (err as any).column) {
-      err.loc = {
-        file: err.id,
-        line: (err as any).line,
-        column: (err as any).column,
-      }
-
-      err.frame ||= generateCodeFrame(err.id!, err.loc)
-    }
-
-    if (
-      ctx instanceof TransformContext &&
-      typeof err.loc?.line === 'number' &&
-      typeof err.loc?.column === 'number'
-    ) {
-      const rawSourceMap = ctx._getCombinedSourcemap()
-
-      if (rawSourceMap) {
-        const traced = new TraceMap(rawSourceMap as any)
-
-        const { source, line, column } = originalPositionFor(traced, {
-          line: Number(err.loc.line),
-          column: Number(err.loc.column),
-        })
-
-        if (source && line != null && column != null) {
-          err.loc = { file: source, line, column }
-        }
-      }
-    }
-  } else if (err.loc) {
-    if (!err.frame) {
-      let code = err.pluginCode
-
-      if (err.loc.file) {
-        err.id = normalizePath(err.loc.file)
-
-        if (!code) {
-          try {
-            code = fs.readFileSync(err.loc.file, 'utf-8')
-          } catch {}
-        }
-      }
-
-      if (code) {
-        err.frame = generateCodeFrame(`${code}`, err.loc)
-      }
-    }
-  }
-
-  if (typeof err.loc?.column !== 'number' && typeof err.loc?.line !== 'number' && !err.loc?.file) {
-    delete err.loc
-  }
-
-  return err
-}
 
 /**
  * Idk what a plugin container is.
@@ -366,6 +156,11 @@ export interface ResolveIdOptions {
   /**
    * Idk.
    */
+  ssr?: boolean
+
+  /**
+   * Idk.
+   */
   scan?: boolean
 
   /**
@@ -400,11 +195,6 @@ export interface LoadOptions {
 }
 
 export let parser = acorn.Parser
-
-async function getOptions(
-  buildOptions: ResolvedConfig['build'],
-  minimalContext: MinimalPluginContext,
-): Promise<InputOptions> {}
 
 export async function createPluginContainer(
   config: ResolvedConfig,
@@ -462,6 +252,8 @@ export async function createPluginContainer(
 
     return promise.finally(() => processesing.delete(promise))
   }
+
+  const watchFiles = new Set<string>()
 
   const minimalContext: MinimalPluginContext = {
     meta: {
@@ -568,7 +360,263 @@ export async function createPluginContainer(
     }
   }
 
-  const pluginContainer: PluginContainer = {
+  // we should create a new context for each async hook pipeline so that the
+  // active plugin in that pipeline can be tracked in a concurrency-safe manner.
+  // using a class to make creating new contexts more efficient
+  class Context implements PluginContext {
+    meta = minimalContext.meta
+    ssr = false
+    _scan = false
+    _activePlugin: Plugin | null
+    _activeId: string | null = null
+    _activeCode: string | null = null
+    _resolveSkips?: Set<Plugin>
+    _addedImports: Set<string> | null = null
+
+    constructor(initialPlugin?: Plugin) {
+      this._activePlugin = initialPlugin || null
+    }
+
+    parse(code: string, opts: any = {}) {
+      return parser.parse(code, {
+        sourceType: 'module',
+        ecmaVersion: 'latest',
+        locations: true,
+        ...opts,
+      })
+    }
+
+    async resolve(
+      id: string,
+      importer?: string,
+      options?: {
+        assertions?: Record<string, string>
+        custom?: CustomPluginOptions
+        isEntry?: boolean
+        skipSelf?: boolean
+      },
+    ) {
+      let skip: Set<Plugin> | undefined
+
+      if (options?.skipSelf && this._activePlugin) {
+        skip = new Set(this._resolveSkips)
+        skip.add(this._activePlugin)
+      }
+
+      let out = await container.resolveId(id, importer, {
+        assertions: options?.assertions,
+        custom: options?.custom,
+        isEntry: !!options?.isEntry,
+        skip,
+        ssr: this.ssr,
+        scan: this._scan,
+      })
+
+      if (typeof out === 'string') {
+        out = { id: out }
+      }
+
+      return out as ResolvedId | null
+    }
+
+    async load(
+      options: {
+        id: string
+        resolveDependencies?: boolean
+      } & Partial<PartialNull<ModuleOptions>>,
+    ): Promise<ModuleInfo> {
+      // We may not have added this to our module graph yet, so ensure it exists
+      await moduleGraph?.ensureEntryFromUrl(unwrapId(options.id), this.ssr)
+      // Not all options passed to this function make sense in the context of loading individual files,
+      // but we can at least update the module info properties we support
+      updateModuleInfo(options.id, options)
+
+      await container.load(options.id, { ssr: this.ssr })
+      const moduleInfo = this.getModuleInfo(options.id)
+      // This shouldn't happen due to calling ensureEntryFromUrl, but 1) our types can't ensure that
+      // and 2) moduleGraph may not have been provided (though in the situations where that happens,
+      // we should never have plugins calling this.load)
+      if (!moduleInfo) throw Error(`Failed to load module with id ${options.id}`)
+      return moduleInfo
+    }
+
+    getModuleInfo(id: string) {
+      return getModuleInfo(id)
+    }
+
+    getModuleIds() {
+      return moduleGraph ? moduleGraph.idToModuleMap.keys() : Array.prototype[Symbol.iterator]()
+    }
+
+    addWatchFile(id: string) {
+      watchFiles.add(id)
+      ;(this._addedImports || (this._addedImports = new Set())).add(id)
+      if (watcher) ensureWatchedFile(watcher, id, root)
+    }
+
+    getWatchFiles() {
+      return [...watchFiles]
+    }
+
+    emitFile(_assetOrFile: EmittedFile) {
+      warnIncompatibleMethod(`emitFile`, this._activePlugin!.name)
+      return ''
+    }
+
+    setAssetSource() {
+      warnIncompatibleMethod(`setAssetSource`, this._activePlugin!.name)
+    }
+
+    getFileName() {
+      warnIncompatibleMethod(`getFileName`, this._activePlugin!.name)
+      return ''
+    }
+
+    warn(
+      e: string | RollupLog | (() => string | RollupLog),
+      position?: number | { column: number; line: number },
+    ) {
+      const err = formatError(typeof e === 'function' ? e() : e, position, this)
+      const msg = buildErrorMessage(err, [colors.yellow(`warning: ${err.message}`)], false)
+      logger.warn(msg, {
+        clear: true,
+        timestamp: true,
+      })
+    }
+
+    error(e: string | RollupError, position?: number | { column: number; line: number }): never {
+      // error thrown here is caught by the transform middleware and passed on
+      // the the error middleware.
+      throw formatError(e, position, this)
+    }
+
+    debug = noop
+    info = noop
+  }
+
+  function formatError(
+    e: string | RollupError,
+    position: number | { column: number; line: number } | undefined,
+    ctx: Context,
+  ) {
+    const err = (typeof e === 'string' ? new Error(e) : e) as postcss.CssSyntaxError & RollupError
+
+    if (err.pluginCode) {
+      return err // The plugin likely called `this.error`
+    }
+
+    if (err.file && err.name === 'CssSyntaxError') {
+      err.id = normalizePath(err.file)
+    }
+
+    if (ctx._activePlugin) {
+      err.plugin = ctx._activePlugin.name
+    }
+
+    if (ctx._activeId && !err.id) {
+      err.id = ctx._activeId
+    }
+
+    if (ctx._activeCode) {
+      err.pluginCode = ctx._activeCode
+
+      // some rollup plugins, e.g. json, sets err.position instead of err.pos
+      const pos = position ?? err.pos ?? (err as any).position
+
+      if (pos != null) {
+        let errLocation
+
+        try {
+          errLocation = numberToPosition(ctx._activeCode, pos)
+        } catch (err2) {
+          logger.error(
+            colors.red(
+              `Error in error handler:\n${(err2 as Error).stack || (err2 as Error).message}\n`,
+            ),
+            // print extra newline to separate the two errors
+            { error: err2 as Error },
+          )
+          throw err
+        }
+
+        err.loc ||= { file: err.id, ...errLocation }
+        err.frame ||= generateCodeFrame(ctx._activeCode, pos)
+      } else if (err.loc) {
+        // css preprocessors may report errors in an included file
+        if (!err.frame) {
+          let code = ctx._activeCode
+
+          if (err.loc.file) {
+            err.id = normalizePath(err.loc.file)
+
+            try {
+              code = fs.readFileSync(err.loc.file, 'utf-8')
+            } catch {}
+          }
+
+          err.frame = generateCodeFrame(code, err.loc)
+        }
+      } else if ((err as any).line && (err as any).column) {
+        err.loc = {
+          file: err.id,
+          line: (err as any).line,
+          column: (err as any).column,
+        }
+
+        err.frame ||= generateCodeFrame(err.id!, err.loc)
+      }
+
+      if (
+        ctx instanceof TransformContext &&
+        typeof err.loc?.line === 'number' &&
+        typeof err.loc?.column === 'number'
+      ) {
+        const rawSourceMap = ctx._getCombinedSourcemap()
+
+        if (rawSourceMap) {
+          const traced = new TraceMap(rawSourceMap as any)
+
+          const { source, line, column } = originalPositionFor(traced, {
+            line: Number(err.loc.line),
+            column: Number(err.loc.column),
+          })
+
+          if (source && line != null && column != null) {
+            err.loc = { file: source, line, column }
+          }
+        }
+      }
+    } else if (err.loc) {
+      if (!err.frame) {
+        let code = err.pluginCode
+
+        if (err.loc.file) {
+          err.id = normalizePath(err.loc.file)
+
+          if (!code) {
+            try {
+              code = fs.readFileSync(err.loc.file, 'utf-8')
+            } catch {}
+          }
+        }
+        if (code) {
+          err.frame = generateCodeFrame(`${code}`, err.loc)
+        }
+      }
+    }
+
+    if (
+      typeof err.loc?.column !== 'number' &&
+      typeof err.loc?.line !== 'number' &&
+      !err.loc?.file
+    ) {
+      delete err.loc
+    }
+
+    return err
+  }
+
+  const container: PluginContainer = {
     options: await getOptions(),
 
     getModuleInfo,
@@ -578,7 +626,7 @@ export async function createPluginContainer(
         hookParallel(
           'buildStart',
           (plugin) => new Context(plugin),
-          () => [pluginContainer.options as NormalizedInputOptions],
+          () => [container.options as NormalizedInputOptions],
         ),
       )
     },
@@ -715,7 +763,7 @@ export async function createPluginContainer(
         try {
           result = await handleHookPromise(handler.call(ctx as any, code, id, { ssr }))
         } catch (e) {
-          ctx.error(e)
+          ctx.error(e as RollupError)
         }
 
         if (!result) {
@@ -774,7 +822,84 @@ export async function createPluginContainer(
     },
   }
 
-  return pluginContainer
+  class TransformContext extends Context {
+    filename: string
+    originalCode: string
+    originalSourcemap: SourceMap | null = null
+    sourcemapChain: NonNullable<SourceDescription['map']>[] = []
+    combinedMap: SourceMap | null = null
+
+    constructor(filename: string, code: string, inMap?: SourceMap | string) {
+      super()
+      this.filename = filename
+      this.originalCode = code
+      if (inMap) {
+        if (debugSourcemapCombine) {
+          // @ts-expect-error inject name for debug purpose
+          inMap.name = '$inMap'
+        }
+        this.sourcemapChain.push(inMap)
+      }
+    }
+
+    _getCombinedSourcemap(createIfNull = false) {
+      if (
+        debugSourcemapCombine &&
+        debugSourcemapCombineFilter &&
+        this.filename.includes(debugSourcemapCombineFilter)
+      ) {
+        debugSourcemapCombine('----------', this.filename)
+        debugSourcemapCombine(this.combinedMap)
+        debugSourcemapCombine(this.sourcemapChain)
+        debugSourcemapCombine('----------')
+      }
+
+      let combinedMap = this.combinedMap
+      for (let m of this.sourcemapChain) {
+        if (typeof m === 'string') {
+          m = JSON.parse(m)
+        }
+
+        if (!('version' in (m as SourceMap))) {
+          // empty, nullified source map
+          combinedMap = this.combinedMap = null
+          this.sourcemapChain.length = 0
+          break
+        }
+
+        if (!combinedMap) {
+          combinedMap = m as SourceMap
+        } else {
+          combinedMap = combineSourceMaps(cleanUrl(this.filename), [
+            m,
+            combinedMap,
+          ] as RawSourceMap[]) as SourceMap
+        }
+      }
+
+      if (!combinedMap) {
+        return createIfNull
+          ? new MagicString(this.originalCode).generateMap({
+              includeContent: true,
+              hires: 'boundary',
+              source: cleanUrl(this.filename),
+            })
+          : null
+      }
+
+      if (combinedMap !== this.combinedMap) {
+        this.combinedMap = combinedMap
+        this.sourcemapChain.length = 0
+      }
+      return this.combinedMap
+    }
+
+    getCombinedSourcemap() {
+      return this._getCombinedSourcemap(true) as SourceMap
+    }
+  }
+
+  return container
 }
 
 const noop = () => {}

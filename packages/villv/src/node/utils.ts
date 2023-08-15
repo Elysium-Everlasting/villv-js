@@ -660,7 +660,11 @@ export function numberToPosition(source: string, offset: number | Position): Pos
   return { line, column }
 }
 
-export function generateCodeFrame(source: string, start: number | Position = 0, end?: number) {
+export function generateCodeFrame(
+  source: string,
+  start: number | Position = 0,
+  end?: number,
+): string {
   /**
    * Absolute starting position, represented as a number.
    */
@@ -702,6 +706,8 @@ export function generateCodeFrame(source: string, start: number | Position = 0, 
 
     ++i
   }
+
+  return res.join('\n')
 }
 
 const splitFirstDirectoryRegex = /(.+?)[\\/](.+)/

@@ -91,6 +91,9 @@ importers:
       '@ampproject/remapping':
         specifier: ^2.2.1
         version: 2.2.1
+      '@jridgewell/trace-mapping':
+        specifier: ^0.3.19
+        version: 0.3.19
       '@rollup/plugin-alias':
         specifier: ^5.0.0
         version: 5.0.0(rollup@3.27.2)
@@ -367,7 +370,7 @@ packages:
     engines: { node: '>=6.0.0' }
     dependencies:
       '@jridgewell/gen-mapping': 0.3.3
-      '@jridgewell/trace-mapping': 0.3.18
+      '@jridgewell/trace-mapping': 0.3.19
 
   /@babel/code-frame@7.22.5:
     resolution:
@@ -1599,7 +1602,7 @@ packages:
     dependencies:
       '@jridgewell/set-array': 1.1.2
       '@jridgewell/sourcemap-codec': 1.4.15
-      '@jridgewell/trace-mapping': 0.3.18
+      '@jridgewell/trace-mapping': 0.3.19
 
   /@jridgewell/resolve-uri@3.1.0:
     resolution:
@@ -1607,6 +1610,7 @@ packages:
         integrity: sha512-F2msla3tad+Mfht5cJq7LSXcdudKTWCVYUgw6pLFOOHSTtZlj6SWNYAp+AhuqLmWdBO2X5hPrLcu8cVP8fy28w==,
       }
     engines: { node: '>=6.0.0' }
+    dev: true
 
   /@jridgewell/resolve-uri@3.1.1:
     resolution:
@@ -1615,7 +1619,6 @@ packages:
       }
     engines: { node: '>=6.0.0' }
     requiresBuild: true
-    dev: true
 
   /@jridgewell/set-array@1.1.2:
     resolution:
@@ -1631,7 +1634,7 @@ packages:
       }
     dependencies:
       '@jridgewell/gen-mapping': 0.3.3
-      '@jridgewell/trace-mapping': 0.3.18
+      '@jridgewell/trace-mapping': 0.3.19
     dev: false
 
   /@jridgewell/sourcemap-codec@1.4.14:
@@ -1639,6 +1642,7 @@ packages:
       {
         integrity: sha512-XPSJHWmi394fuUuzDnGz1wiKqWfo1yXecHQMRf2l6hztTO+nPru658AyDngaBe7isIxEkRsPR3FZh+s7iVa4Uw==,
       }
+    dev: true
 
   /@jridgewell/sourcemap-codec@1.4.15:
     resolution:
@@ -1654,6 +1658,16 @@ packages:
     dependencies:
       '@jridgewell/resolve-uri': 3.1.0
       '@jridgewell/sourcemap-codec': 1.4.14
+    dev: true
+
+  /@jridgewell/trace-mapping@0.3.19:
+    resolution:
+      {
+        integrity: sha512-kf37QtfW+Hwx/buWGMPcR60iF9ziHa6r/CZJIHbmcm4+0qrXiVdxegAH0F6yddEVQ7zdkjcGCgCzUu+BcbhQxw==,
+      }
+    dependencies:
+      '@jridgewell/resolve-uri': 3.1.1
+      '@jridgewell/sourcemap-codec': 1.4.15
 
   /@jridgewell/trace-mapping@0.3.9:
     resolution:
