@@ -43,6 +43,7 @@ import { loadEnv, resolveEnvPrefix } from './env.js'
 import { resolveBuildOptions } from './build.js'
 import { createPluginContainer, type PluginContainer } from './server/plugin-container.js'
 import { resolveSSROptions } from './ssr/index.js'
+import { resolvePreviewOptions } from './preview.js'
 
 export interface UserConfig {
   /**
@@ -807,7 +808,7 @@ export async function resolveConfig(
     ...resolvedConfig,
   }
 
-  return config
+  return resolved
 }
 
 interface ConfigLoadedFromFile {

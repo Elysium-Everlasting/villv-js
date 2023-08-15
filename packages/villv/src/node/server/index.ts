@@ -94,3 +94,38 @@ export interface FileSystemOptions {
    */
   deny?: string[]
 }
+
+export interface ResolvedServerOptions extends ServerOptions {
+  fs: Required<FileSystemServeOptions>
+  middlewareMode: boolean
+  sourcemapIgnoreList: Exclude<ServerOptions['sourcemapIgnoreList'], false | undefined>
+}
+
+export interface FileSystemServeOptions {
+  /**
+   * Strictly restrict file accessing outside of allowing paths.
+   *
+   * Set to `false` to disable the warning
+   *
+   * @default true
+   */
+  strict?: boolean
+
+  /**
+   * Restrict accessing files outside the allowed directories.
+   *
+   * Accepts absolute path or a path relative to project root.
+   * Will try to search up for workspace root by default.
+   */
+  allow?: string[]
+
+  /**
+   * Restrict accessing files that matches the patterns.
+   *
+   * This will have higher priority than `allow`.
+   * picomatch patterns are supported.
+   *
+   * @default ['.env', '.env.*', '*.crt', '*.pem']
+   */
+  deny?: string[]
+}
