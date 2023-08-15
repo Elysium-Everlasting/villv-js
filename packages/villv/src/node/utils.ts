@@ -10,7 +10,6 @@ import picocolors from 'picocolors'
 import debug from 'debug'
 import type { FSWatcher } from 'chokidar'
 // import type MagicString from 'magic-string'
-import type { BuildOptions } from 'esbuild'
 // import type { TransformResult } from 'rollup'
 import { createFilter, type FilterPattern } from '@rollup/pluginutils'
 import type { Alias, RollupAliasOptions } from '@rollup/plugin-alias'
@@ -27,6 +26,7 @@ import {
 import type { DecodedSourceMap, RawSourceMap } from '@ampproject/remapping'
 import remapping from '@ampproject/remapping'
 import type { ResolvedServerUrls } from './logger.js'
+import type { DependencyOptimizationConfig } from './optimizer/index.js'
 
 /**
  * TODO: move this somewhere else too.
@@ -51,88 +51,6 @@ export type { FilterPattern }
  * Re-export.
  */
 export { createFilter }
-
-/**
- * TODO: move this to src/node/optimizer/index.ts
- */
-export interface DepOptimizationConfig {
-  /**
-   * Force optimize listed dependencies (must be resolvable import paths, cannot be globs).
-   */
-  include?: string[]
-
-  /**
-   * Do not optimize these dependencies (must be resolvable import paths, cannot be globs).
-   */
-  exclude?: string[]
-
-  /**
-   * Forces ESM interop when importing these dependencies.
-   * Some legacy packages advertise themselves as ESM but use `require` internally
-   *
-   * @experimental
-   */
-  needsInterop?: string[]
-
-  /**
-   * Options to pass to esbuild during the dep scanning and optimization.
-   *
-   * Certain options are omitted since changing them would not be compatible with Vite's dep optimization.
-   *
-   * - `external` is also omitted, use Vite's `optimizeDeps.exclude` option
-   * - `plugins` are merged with Vite's dep plugin
-   *
-   * https://esbuild.github.io/api
-   */
-  esbuildOptions?: Omit<
-    BuildOptions,
-    | 'bundle'
-    | 'entryPoints'
-    | 'external'
-    | 'write'
-    | 'watch'
-    | 'outdir'
-    | 'outfile'
-    | 'outbase'
-    | 'outExtension'
-    | 'metafile'
-  >
-
-  /**
-   * List of file extensions that can be optimized.
-   * A corresponding esbuild plugin must exist to handle the specific extension.
-   *
-   * By default, Vite can optimize `.mjs`, `.js`, `.ts`, and `.mts` files.
-   * This option allows specifying additional extensions.
-   *
-   * @experimental
-   */
-  extensions?: string[]
-
-  /**
-   * Disables dependencies optimizations, true disables the optimizer during build and dev.
-   * Pass 'build' or 'dev' to only disable the optimizer in one of the modes.
-   * Deps optimization is enabled by default in dev only.
-   *
-   * @default 'build'
-   *
-   * @experimental
-   */
-  disabled?: boolean | 'build' | 'dev'
-
-  /**
-   * Automatic dependency discovery.
-   *
-   * When `noDiscovery` is true, only dependencies listed in `include` will be optimized.
-   * The scanner isn't run for cold start in this case.
-   * CJS-only dependencies must be present in `include` during dev.
-   *
-   * @default false
-   *
-   * @experimental
-   */
-  noDiscovery?: boolean
-}
 
 /**
  * Windows uses backslashes for path separators, but Rollup expects forward.
@@ -246,7 +164,7 @@ export function moduleListContains(moduleList: string[] = [], id: string): boole
   return moduleList.some((m) => m === id || id.startsWith(`${m}/`))
 }
 
-export function isOptimizable(id: string, optimizeDeps: DepOptimizationConfig): boolean {
+export function isOptimizable(id: string, optimizeDeps: DependencyOptimizationConfig): boolean {
   return (
     OPTIMIZABLE_ENTRY_REGEX.test(id) ||
     optimizeDeps.extensions?.some((ext) => id.endsWith(ext)) ||

@@ -4,10 +4,10 @@ import colors from 'picocolors'
 import { createRequire } from 'node:module'
 import { build, type BuildOptions as ESBuildOptions } from 'esbuild'
 import type { ObjectHook, RollupOptions } from 'rollup'
-import type { RollupAliasOptions } from '@rollup/plugin-alias'
+import aliasPlugin, { type RollupAliasOptions } from '@rollup/plugin-alias'
 import type { Plugin } from './plugin.js'
 import { createLogger, type LogLevel, type Logger } from './logger.js'
-import { tryNodeResolve, type ResolveOptions } from './plugins/resolve.js'
+import { tryNodeResolve, type ResolveOptions, resolvePlugin } from './plugins/resolve.js'
 import type { CssOptions } from './plugins/css.js'
 import type { JsonOptions } from './plugins/json.js'
 import type { ServerOptions } from './server/index.js'
@@ -41,6 +41,8 @@ import { pathToFileURL } from 'node:url'
 import { getSortedPluginsBy } from './plugins/index.js'
 import { loadEnv, resolveEnvPrefix } from './env.js'
 import { resolveBuildOptions } from './build.js'
+import { createPluginContainer, type PluginContainer } from './server/plugin-container.js'
+import { resolveSSROptions } from './ssr/index.js'
 
 export interface UserConfig {
   /**
@@ -667,6 +669,7 @@ export async function resolveConfig(
 
     return async (id, importer, aliasOnly, ssr) => {
       let container: PluginContainer
+
       if (aliasOnly) {
         container =
           aliasContainer ||
@@ -696,12 +699,7 @@ export async function resolveConfig(
             ],
           }))
       }
-      return (
-        await container.resolveId(id, importer, {
-          ssr,
-          scan: options?.scan,
-        })
-      )?.id
+      return (await container.resolveId(id, importer, { ssr, scan: options?.scan }))?.id
     }
   }
 
