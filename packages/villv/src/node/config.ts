@@ -10,7 +10,7 @@ import { createLogger, type LogLevel, type Logger } from './logger.js'
 import { tryNodeResolve, type ResolveOptions, resolvePlugin } from './plugins/resolve.js'
 import { resolveCSSOptions, type CSSOptions } from './plugins/css.js'
 import type { JsonOptions } from './plugins/json.js'
-import type { ServerOptions } from './server/index.js'
+import { resolveServerOptions, type ServerOptions } from './server/index.js'
 import type { BuildOptions } from './server/build.js'
 import { findNearestPackageData, type PackageCache } from './packages.js'
 import {

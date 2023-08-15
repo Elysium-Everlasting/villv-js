@@ -1,6 +1,12 @@
+import path from 'node:path'
+import colors from 'picocolors'
 import type { WatchOptions } from 'chokidar'
 import type { CommonServerOptions } from '../http.js'
 import type { HmrOptions } from './hmr.js'
+import type { Logger } from '../logger.js'
+import { isInNodeModules, isParentDirectory, normalizePath } from '../utils.js'
+import { getWorkspaceRoot } from '../../utils/project.js'
+import { CLIENT_DIRECTORY } from '../constants.js'
 
 export interface ServerOptions extends CommonServerOptions {
   /**
@@ -128,4 +134,57 @@ export interface FileSystemServeOptions {
    * @default ['.env', '.env.*', '*.crt', '*.pem']
    */
   deny?: string[]
+}
+
+export function resolveServerOptions(root: string, raw: ServerOptions | undefined, logger: Logger) {
+  let allowDirs = raw?.fs?.allow
+
+  const deny = raw?.fs?.deny ?? ['.env', '.env.*', '*.{crt,pem}']
+
+  if (!allowDirs) {
+    allowDirs = [getWorkspaceRoot(root)]
+  }
+
+  allowDirs = allowDirs.map((i) => resolvedAllowDir(root, i))
+
+  allowDirs = allowDirs.map((i) => resolvedAllowDir(root, i))
+
+  // only push client dir when vite itself is outside-of-root
+  const resolvedClientDir = resolvedAllowDir(root, CLIENT_DIRECTORY)
+
+  if (!allowDirs.some((directory) => isParentDirectory(directory, resolvedClientDir))) {
+    allowDirs.push(resolvedClientDir)
+  }
+
+  const server: ResolvedServerOptions = {
+    preTransformRequests: true,
+    ...raw,
+    sourcemapIgnoreList:
+      raw?.sourcemapIgnoreList === false
+        ? () => false
+        : raw?.sourcemapIgnoreList ?? isInNodeModules,
+    middlewareMode: !!raw?.middlewareMode,
+    fs: {
+      strict: raw?.fs?.strict ?? true,
+      allow: allowDirs,
+      deny,
+    },
+  }
+
+  if (server.origin?.endsWith('/')) {
+    server.origin = server.origin.slice(0, -1)
+    logger.warn(
+      colors.yellow(
+        `${colors.bold('(!)')} server.origin should not end with "/". Using "${
+          server.origin
+        }" instead.`,
+      ),
+    )
+  }
+
+  return server
+}
+
+function resolvedAllowDir(root: string, dir: string): string {
+  return normalizePath(path.resolve(root, dir))
 }
