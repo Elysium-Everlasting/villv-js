@@ -1,6 +1,7 @@
-import type { ProcessOptions, AcceptedPlugin } from 'postcss'
 import type { BundleAsyncOptions, CustomAtRules } from 'lightningcss'
+import type { ProcessOptions, AcceptedPlugin } from 'postcss'
 import type PostcssModulesPlugin from 'postcss-modules'
+
 import { ESBUILD_MODULES_TARGET } from '../constants'
 import { toArray } from '../utils'
 

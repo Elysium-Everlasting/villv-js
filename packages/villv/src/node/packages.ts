@@ -1,6 +1,7 @@
 import fs from 'node:fs'
-import path from 'node:path'
 import { createRequire } from 'node:module'
+import path from 'node:path'
+
 import { createFilter, safeRealpathSync } from './utils'
 
 let pnp: typeof import('pnpapi') | undefined

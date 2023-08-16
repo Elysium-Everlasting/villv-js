@@ -1,6 +1,8 @@
 import type http from 'node:http'
 import type https from 'node:https'
+
 import type { CorsOptions } from 'cors'
+
 import type { ProxyOptions } from './server/middlewares/proxy.js'
 
 export interface CommonServerOptions {

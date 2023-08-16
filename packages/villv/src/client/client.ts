@@ -1,10 +1,11 @@
-import type { ErrorInfo, HMRPayload, Update } from '../types/hmrPayload.js'
-import type { ModuleNamespace, ViteHotContext } from '../types/hot.js'
 import type {
   InferCustomEventPayload,
   InvalidatePayload,
   MaybeCustomEventMapKey,
 } from '../types/customEvent.js'
+import type { ErrorInfo, HMRPayload, Update } from '../types/hmrPayload.js'
+import type { ModuleNamespace, ViteHotContext } from '../types/hot.js'
+
 import { ErrorOverlay, overlayId } from './overlay.js'
 
 interface HotModule {

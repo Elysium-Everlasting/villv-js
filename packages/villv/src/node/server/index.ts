@@ -1,12 +1,15 @@
 import path from 'node:path'
-import colors from 'picocolors'
+
 import type { WatchOptions } from 'chokidar'
-import type { CommonServerOptions } from '../http.js'
-import type { HmrOptions } from './hmr.js'
-import type { Logger } from '../logger.js'
-import { isInNodeModules, isParentDirectory, normalizePath } from '../utils.js'
+import colors from 'picocolors'
+
 import { getWorkspaceRoot } from '../../utils/project.js'
 import { CLIENT_DIRECTORY } from '../constants.js'
+import type { CommonServerOptions } from '../http.js'
+import type { Logger } from '../logger.js'
+import { isInNodeModules, isParentDirectory, normalizePath } from '../utils.js'
+
+import type { HmrOptions } from './hmr.js'
 
 export interface ServerOptions extends CommonServerOptions {
   /**

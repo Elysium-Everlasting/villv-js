@@ -1,4 +1,5 @@
 import readline from 'node:readline'
+
 import colors from 'picocolors'
 import type { RollupError } from 'rollup'
 

@@ -4,8 +4,9 @@
  * This file is circular because it imports from `config.ts` and `config.ts` imports from this file.
  */
 
-import type { UserConfig, ConfigEnv, ResolvedConfig, Command } from './config.js'
 import type * as Rollup from 'rollup'
+
+import type { UserConfig, ConfigEnv, ResolvedConfig, Command } from './config.js'
 
 /**
  * Vite plugins extend Rollup's plugin API with some additional Vite-specific options.

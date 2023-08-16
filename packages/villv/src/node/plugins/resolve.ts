@@ -1,8 +1,11 @@
 import fs from 'node:fs'
 import path from 'node:path'
+
+import { hasESMSyntax } from 'mlly'
 import colors from 'picocolors'
 import { exports, imports } from 'resolve.exports'
-import { hasESMSyntax } from 'mlly'
+import type { PartialResolvedId } from 'rollup'
+
 import {
   DEFAULT_MAIN_FIELDS,
   DEFAULT_EXTENSIONS,
@@ -13,6 +16,7 @@ import {
   CLIENT_ENTRY,
   ENV_ENTRY,
 } from '../constants.js'
+import { optimizedDependencyInfoFromFile, type DependencyOptimizer } from '../optimizer/index.js'
 import {
   findNearestMainPackageData,
   resolvePackageData,
@@ -21,6 +25,8 @@ import {
   findNearestPackageData,
   loadPackageData,
 } from '../packages.js'
+import type { Plugin } from '../plugin.js'
+import type { SSROptions } from '../ssr/index.js'
 import {
   bareImportREGEX,
   cleanUrl,
@@ -43,10 +49,6 @@ import {
   normalizeSlash,
   getNpmPackageName,
 } from '../utils.js'
-import type { PartialResolvedId } from 'rollup'
-import type { Plugin } from '../plugin.js'
-import { optimizedDependencyInfoFromFile, type DependencyOptimizer } from '../optimizer/index.js'
-import type { SSROptions } from '../ssr/index.js'
 
 const startsWithWordCharREGEX = /^\w/
 

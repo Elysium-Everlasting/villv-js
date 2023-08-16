@@ -10,11 +10,14 @@ const config = {
     project: ['./tsconfig.json'],
     sourceType: 'module',
   },
-  plugins: ['simple-import-sort', '@typescript-eslint'],
+  plugins: ['import', '@typescript-eslint'],
   extends: [
     'eslint:recommended',
+    'plugin:import/recommended',
+    'plugin:import/typescript',
     'plugin:@typescript-eslint/recommended',
     'plugin:@typescript-eslint/eslint-recommended',
+    'prettier',
   ],
   rules: {
     '@typescript-eslint/no-unused-vars': [
@@ -25,6 +28,20 @@ const config = {
         caughtErrorsIgnorePattern: '^_',
       },
     ],
+    'import/order': [
+      'error',
+      {
+        alphabetize: {
+          order: 'asc',
+        },
+        'newlines-between': 'always',
+      },
+    ],
+  },
+  settings: {
+    'import/resolver': {
+      typescript: true,
+    },
   },
   ignorePatterns: ['*.config.*', '*.cjs'],
 }

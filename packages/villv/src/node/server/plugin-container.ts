@@ -1,9 +1,13 @@
 import fs from 'node:fs'
 import path from 'node:path'
+
+import type { RawSourceMap, SourceMapInput } from '@ampproject/remapping'
+import { TraceMap, originalPositionFor } from '@jridgewell/trace-mapping'
 import acorn from 'acorn'
-import postcss from 'postcss'
-import colors from 'picocolors'
+import type { FSWatcher } from 'chokidar'
 import MagicString from 'magic-string'
+import colors from 'picocolors'
+import postcss from 'postcss'
 import { VERSION as rollupVersion } from 'rollup'
 import type {
   AsyncPluginHooks,
@@ -27,10 +31,11 @@ import type {
   RollupError,
   EmittedFile,
 } from 'rollup'
-import { TraceMap, originalPositionFor } from '@jridgewell/trace-mapping'
-import type { Plugin } from '../plugin.js'
-import type { FSWatcher } from 'chokidar'
+
 import type { ResolvedConfig } from '../config.js'
+import { FS_PREFIX } from '../constants.js'
+import type { Plugin } from '../plugin.js'
+import { createPluginHookUtils } from '../plugins/index.js'
 import {
   cleanUrl,
   combineSourceMaps,
@@ -47,9 +52,6 @@ import {
   toArray,
   unwrapId,
 } from '../utils.js'
-import { createPluginHookUtils } from '../plugins/index.js'
-import { FS_PREFIX } from '../constants.js'
-import type { RawSourceMap, SourceMapInput } from '@ampproject/remapping'
 
 function cleanStack(stack: string) {
   return stack

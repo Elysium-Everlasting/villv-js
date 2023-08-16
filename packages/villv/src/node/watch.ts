@@ -1,7 +1,8 @@
-import glob from 'fast-glob'
 import type { WatchOptions } from 'chokidar'
-import { toArray } from './utils.js'
+import { escapePath } from 'fast-glob'
+
 import { DEFAULT_CACHE_DIRECTORY } from './constants.js'
+import { toArray } from './utils.js'
 
 const GIT_FILES = '**/.git/**'
 
@@ -25,11 +26,7 @@ export function resolveChokidarOptions(
   const { ignored = [], ...otherOptions } = options
 
   const resolvedChokidarOptions: WatchOptions = {
-    ignored: [
-      ...DEFAULT_IGNORED_FILES,
-      `${glob.escapePath(cacheDirectory)}/**`,
-      ...toArray(ignored),
-    ],
+    ignored: [...DEFAULT_IGNORED_FILES, `${escapePath(cacheDirectory)}/**`, ...toArray(ignored)],
     ignoreInitial: true,
     ignorePermissionErrors: true,
     ...otherOptions,

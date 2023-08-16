@@ -1,8 +1,9 @@
-import type Terser from 'terser'
-import type { InputOption, ModuleFormat, RollupOptions, WatcherOptions } from 'rollup'
-import type { TransformOptions } from 'esbuild'
 import type { RollupCommonJSOptions } from '@rollup/plugin-commonjs'
 import type { RollupDynamicImportVariablesOptions } from '@rollup/plugin-dynamic-import-vars'
+import type { TransformOptions } from 'esbuild'
+import type { InputOption, ModuleFormat, RollupOptions, WatcherOptions } from 'rollup'
+import type Terser from 'terser'
+
 import type { CssTransformer } from '../plugins/css'
 
 export interface BuildOptions {

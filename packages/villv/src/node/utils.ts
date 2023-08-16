@@ -1,18 +1,22 @@
-import os from 'node:os'
-import fs from 'node:fs'
-import path from 'node:path'
-// import url from 'node:url'
+import { exec } from 'node:child_process'
 import crypto from 'node:crypto'
 import { promises as dns } from 'node:dns'
-import { exec } from 'node:child_process'
+import fs from 'node:fs'
 import { builtinModules, createRequire } from 'node:module'
-import picocolors from 'picocolors'
-import debug from 'debug'
+import os from 'node:os'
+import path from 'node:path'
+// import url from 'node:url'
+
+import type { DecodedSourceMap, RawSourceMap } from '@ampproject/remapping'
+import remapping from '@ampproject/remapping'
+import type { Alias, RollupAliasOptions } from '@rollup/plugin-alias'
+import { createFilter, type FilterPattern } from '@rollup/pluginutils'
 import type { FSWatcher } from 'chokidar'
+import debug from 'debug'
+import picocolors from 'picocolors'
 // import type MagicString from 'magic-string'
 // import type { TransformResult } from 'rollup'
-import { createFilter, type FilterPattern } from '@rollup/pluginutils'
-import type { Alias, RollupAliasOptions } from '@rollup/plugin-alias'
+
 import {
   CLIENT_ENTRY,
   CLIENT_PUBLIC_PATH,
@@ -23,8 +27,6 @@ import {
   VALID_ID_PREFIX,
   wildcardHosts,
 } from './constants.js'
-import type { DecodedSourceMap, RawSourceMap } from '@ampproject/remapping'
-import remapping from '@ampproject/remapping'
 import type { ResolvedServerUrls } from './logger.js'
 import type { DependencyOptimizationConfig } from './optimizer/index.js'
 

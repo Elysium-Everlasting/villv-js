@@ -1,4 +1,5 @@
 import type http from 'node:http'
+
 import type ProxyServer from 'http-proxy'
 
 export interface ProxyOptions extends ProxyServer.ServerOptions {

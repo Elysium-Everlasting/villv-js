@@ -1,4 +1,5 @@
 import path from 'node:path'
+
 import { version } from '../../package.json'
 import { getClosestProjectDirectory } from '../utils/project.js'
 

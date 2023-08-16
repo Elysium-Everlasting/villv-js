@@ -7,6 +7,7 @@
  */
 
 import type { ObjectHook } from 'rollup'
+
 import type { Plugin } from '../plugin.js'
 
 /**

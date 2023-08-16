@@ -1,64 +1,19 @@
 import fs from 'node:fs'
-import path from 'node:path'
-import util from 'node:util'
-import url from 'node:url'
 import { createRequire } from 'node:module'
-
-import colors from 'picocolors'
-
-import type { ObjectHook, RollupOptions } from 'rollup'
-
-import { build, type BuildOptions as ESBuildOptions } from 'esbuild'
+import path from 'node:path'
+import url from 'node:url'
+import util from 'node:util'
 
 import aliasPlugin, { type RollupAliasOptions } from '@rollup/plugin-alias'
-
-import { getSortedPluginsBy } from './plugins/index.js'
-
-import { resolveCSSOptions, type CSSOptions, type ResolvedCSSOptions } from './plugins/css.js'
-
-import {
-  resolvePlugin,
-  tryNodeResolve,
-  type ResolveOptions,
-  type InternalResolveOptions,
-} from './plugins/resolve.js'
-
-import type { JsonOptions } from './plugins/json.js'
-
-import type { BuildOptions } from './server/build.js'
-
-import { createPluginContainer, type PluginContainer } from './server/plugin-container.js'
-
-import {
-  resolveServerOptions,
-  type ResolvedServerOptions,
-  type ServerOptions,
-} from './server/index.js'
-
-import type { DependencyOptimizationOptions } from './optimizer/index.js'
-
-import { resolveSSROptions, type ResolvedSSROptions, type SSROptions } from './ssr/index.js'
-
-import type { Plugin } from './plugin.js'
-
-import { loadEnv, resolveEnvPrefix } from './env.js'
-
-import { createLogger, type LogLevel, type Logger } from './logger.js'
-
-import { findNearestPackageData, type PackageCache } from './packages.js'
+import { build, type BuildOptions as ESBuildOptions } from 'esbuild'
+import colors from 'picocolors'
+import type { ObjectHook, RollupOptions } from 'rollup'
 
 import {
   resolveBuildOptions,
   type RenderBuiltAssetUrl,
   type ResolvedBuildOptions,
 } from './build.js'
-
-import {
-  resolvePreviewOptions,
-  type PreviewOptions,
-  type ResolvedPreviewOptions,
-} from './preview.js'
-
 import {
   CLIENT_ENTRY,
   DEFAULT_ASSETS_REGEX,
@@ -68,7 +23,33 @@ import {
   ENV_ENTRY,
   FS_PREFIX,
 } from './constants.js'
-
+import { loadEnv, resolveEnvPrefix } from './env.js'
+import { createLogger, type LogLevel, type Logger } from './logger.js'
+import type { DependencyOptimizationOptions } from './optimizer/index.js'
+import { findNearestPackageData, type PackageCache } from './packages.js'
+import type { Plugin } from './plugin.js'
+import { resolveCSSOptions, type CSSOptions, type ResolvedCSSOptions } from './plugins/css.js'
+import { getSortedPluginsBy } from './plugins/index.js'
+import type { JsonOptions } from './plugins/json.js'
+import {
+  resolvePlugin,
+  tryNodeResolve,
+  type ResolveOptions,
+  type InternalResolveOptions,
+} from './plugins/resolve.js'
+import {
+  resolvePreviewOptions,
+  type PreviewOptions,
+  type ResolvedPreviewOptions,
+} from './preview.js'
+import type { BuildOptions } from './server/build.js'
+import {
+  resolveServerOptions,
+  type ResolvedServerOptions,
+  type ServerOptions,
+} from './server/index.js'
+import { createPluginContainer, type PluginContainer } from './server/plugin-container.js'
+import { resolveSSROptions, type ResolvedSSROptions, type SSROptions } from './ssr/index.js'
 import {
   asyncFlatten,
   createDebugger,
