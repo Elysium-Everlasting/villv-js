@@ -28,11 +28,25 @@ export type ResolveModulePreloadDependenciesFn = (
  * TODO
  */
 export function resolveBuildOptions(
-  raw?: BuildOptions,
+  raw: BuildOptions | undefined,
   logger: Logger,
   root: string,
 ): ResolvedBuildOptions {
+  raw
+  logger
+  root
+
   return {
     modulePreload: false,
   }
 }
+
+export type RenderBuiltAssetUrl = (
+  filename: string,
+  type: {
+    type: 'asset' | 'public'
+    hostId: string
+    hostType: 'js' | 'css' | 'html'
+    ssr: boolean
+  },
+) => string | { relative?: boolean; runtime?: string } | undefined

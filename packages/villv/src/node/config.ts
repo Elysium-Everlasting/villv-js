@@ -1,18 +1,64 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import colors from 'picocolors'
+import util from 'node:util'
+import url from 'node:url'
 import { createRequire } from 'node:module'
-import { build, type BuildOptions as ESBuildOptions } from 'esbuild'
+
+import colors from 'picocolors'
+
 import type { ObjectHook, RollupOptions } from 'rollup'
+
+import { build, type BuildOptions as ESBuildOptions } from 'esbuild'
+
 import aliasPlugin, { type RollupAliasOptions } from '@rollup/plugin-alias'
-import type { Plugin } from './plugin.js'
-import { createLogger, type LogLevel, type Logger } from './logger.js'
-import { tryNodeResolve, type ResolveOptions, resolvePlugin } from './plugins/resolve.js'
-import { resolveCSSOptions, type CSSOptions } from './plugins/css.js'
+
+import { getSortedPluginsBy } from './plugins/index.js'
+
+import { resolveCSSOptions, type CSSOptions, type ResolvedCSSOptions } from './plugins/css.js'
+
+import {
+  resolvePlugin,
+  tryNodeResolve,
+  type ResolveOptions,
+  type InternalResolveOptions,
+} from './plugins/resolve.js'
+
 import type { JsonOptions } from './plugins/json.js'
-import { resolveServerOptions, type ServerOptions } from './server/index.js'
+
 import type { BuildOptions } from './server/build.js'
+
+import { createPluginContainer, type PluginContainer } from './server/plugin-container.js'
+
+import {
+  resolveServerOptions,
+  type ResolvedServerOptions,
+  type ServerOptions,
+} from './server/index.js'
+
+import type { DependencyOptimizationOptions } from './optimizer/index.js'
+
+import { resolveSSROptions, type ResolvedSSROptions, type SSROptions } from './ssr/index.js'
+
+import type { Plugin } from './plugin.js'
+
+import { loadEnv, resolveEnvPrefix } from './env.js'
+
+import { createLogger, type LogLevel, type Logger } from './logger.js'
+
 import { findNearestPackageData, type PackageCache } from './packages.js'
+
+import {
+  resolveBuildOptions,
+  type RenderBuiltAssetUrl,
+  type ResolvedBuildOptions,
+} from './build.js'
+
+import {
+  resolvePreviewOptions,
+  type PreviewOptions,
+  type ResolvedPreviewOptions,
+} from './preview.js'
+
 import {
   CLIENT_ENTRY,
   DEFAULT_ASSETS_REGEX,
@@ -22,6 +68,7 @@ import {
   ENV_ENTRY,
   FS_PREFIX,
 } from './constants.js'
+
 import {
   asyncFlatten,
   createDebugger,
@@ -36,15 +83,10 @@ import {
   normalizeAlias,
   normalizePath,
 } from './utils.js'
-import { promisify } from 'util'
-import { pathToFileURL } from 'node:url'
-import { getSortedPluginsBy } from './plugins/index.js'
-import { loadEnv, resolveEnvPrefix } from './env.js'
-import { resolveBuildOptions } from './build.js'
-import { createPluginContainer, type PluginContainer } from './server/plugin-container.js'
-import { resolveSSROptions } from './ssr/index.js'
-import { resolvePreviewOptions } from './preview.js'
 
+/**
+ * User config object that the API consumer can pass in.
+ */
 export interface UserConfig {
   /**
    * Path to project root directory.
@@ -99,8 +141,6 @@ export interface UserConfig {
    * the command line `--mode` options.
    *
    * @default (per command)
-   *
-   * TODO
    */
   mode?: string
 
@@ -110,7 +150,7 @@ export interface UserConfig {
    * Entries will be defined on {@link window} during development,
    * and with ESBuild's [define](https://esbuild.github.io/api/#define) API during build.
    */
-  define?: Record<string, any>
+  define?: Record<string, unknown>
 
   /**
    * Array of plugins to use.
@@ -156,15 +196,11 @@ export interface UserConfig {
    * Configure the development server.
    *
    * i.e. host, port, protocol, etc.
-   *
-   * TODO
    */
   server?: ServerOptions
 
   /**
    * Configure the build procedure.
-   *
-   * TODO
    */
   build?: BuildOptions
 
@@ -172,26 +208,20 @@ export interface UserConfig {
    * Configure the preview server.
    *
    * i.e. host, port, protocol, etc.
-   *
-   * TODO
    */
-  preview?: any // PreviewOptions
+  preview?: PreviewOptions
 
   /**
    * Dependency optimization options.
-   *
-   * TODO
    */
-  optimizeDependencies?: any // DepOptimizationOptions
+  optimizeDependencies?: DependencyOptimizationOptions
 
   /**
    * Configure SSR procedures.
    *
    * i.e. custom rendering logic based on the request, etc.
-   *
-   * TODO
    */
-  ssr?: any // SSROptions
+  ssr?: SSROptions
 
   /**
    * Experimental features.
@@ -201,7 +231,7 @@ export interface UserConfig {
    *
    * @experimental
    */
-  experimental?: any // ExperimentalOptions
+  experimental?: ExperimentalOptions
 
   /**
    * Legacy options.
@@ -211,7 +241,7 @@ export interface UserConfig {
    *
    * @legacy
    */
-  legacy?: any // LegacyOptions
+  legacy?: LegacyOptions
 
   /**
    * Log level.
@@ -267,6 +297,17 @@ export interface UserConfig {
   appType?: AppType
 }
 
+export interface LegacyOptions {
+  /**
+   * Revert vite build --ssr to the v2.9 strategy. Use CJS SSR build and v2.9 externalization heuristics
+   *
+   * @experimental
+   * @deprecated
+   * @default false
+   */
+  buildSsrCjsExternalHeuristics?: boolean
+}
+
 /**
  * What's a worker bundle? How is it different from the other bundle?
  */
@@ -280,10 +321,8 @@ export interface WorkerBundleOptions {
 
   /**
    * Plugins that only apply to the worker bundle.
-   *
-   * TODO
    */
-  plugins?: any // PluginOption[]
+  plugins?: PluginOption[]
 
   /**
    * Rollup options to build the worker bundle.
@@ -329,82 +368,109 @@ type InternalConfig = {
 
   envDir: string
 
-  env: Record<string, any>
+  env: Record<string, unknown>
 
   resolve: Required<ResolveOptions> & { alias: RollupAliasOptions['entries'] }
 
   plugins: readonly Plugin[]
 
   /**
-   * TODO
    */
-  css: any // ResolvedCSSOptions | undefined
+  css: ResolvedCSSOptions | undefined
 
   esbuild: ESBuildOptions | false
 
   /**
-   * TODO
    */
-  server: any // ResolvedServerOptions
+  server: ResolvedServerOptions
 
   /**
-   * TODO
    */
-  build: any // ResolvedBuildOptions
+  build: ResolvedBuildOptions
 
   /**
-   * TODO
    */
-  preview: any // ResolvedPreviewOptions
+  preview: ResolvedPreviewOptions
 
   /**
-   * TODO
    */
-  ssr: any // ResolvedSSROptions
+  ssr: ResolvedSSROptions
 
   assetsInclude: (file: string) => boolean
 
   logger: Logger
 
   /**
-   * TODO
    */
-  createResolver: any // (options?: Partial<InternalResolveOptions>) => ResolveFn
+  createResolver: (options?: Partial<InternalResolveOptions>) => ResolveFn
 
   /**
-   * TODO
    */
-  optimizeDeps: any // DepOptimizationOptions
+  optimizeDeps: DependencyOptimizationOptions
 
   /**
    * @internal
-   *
-   * TODO
    */
-  packageCache: any // PackageCache
+  packageCache: PackageCache
 
   /**
-   * TODO
    */
-  worker: any // ResolveWorkerOptions
+  worker: ResolveWorkerOptions
 
   appType: AppType
 
   /**
-   * TODO
    */
-  experimental: any // ExperimentalOptions
+  experimental: ExperimentalOptions
 }
+
+export interface ExperimentalOptions {
+  /**
+   * Append fake `&lang.(ext)` when queries are specified, to preserve the file extension for following plugins to process.
+   *
+   * @experimental
+   * @default false
+   */
+  importGlobRestoreExtension?: boolean
+  /**
+   * Allow finegrain control over assets and public files paths
+   *
+   * @experimental
+   */
+  renderBuiltUrl?: RenderBuiltAssetUrl
+  /**
+   * Enables support of HMR partial accept via `import.meta.hot.acceptExports`.
+   *
+   * @experimental
+   * @default false
+   */
+  hmrPartialAccept?: boolean
+  /**
+   * Skips SSR transform to make it easier to use Vite with Node ESM loaders.
+   * @warning Enabling this will break normal operation of Vite's SSR in development mode.
+   *
+   * @experimental
+   * @default false
+   */
+  skipSsrTransform?: boolean
+}
+
+export type ResolveFn = (
+  id: string,
+  importer?: string,
+  aliasOnly?: boolean,
+  ssr?: boolean,
+) => Promise<string | undefined>
 
 /**
  * TODO: move this somewhere else?
  */
-export type HookHandler<T> = T extends ObjectHook<infer H> ? H : T
+type HookHandler<T> = T extends ObjectHook<infer H> ? H : T
 
 /**
  * TODO
  */
-export interface PluginHookUtils {
+interface PluginHookUtils {
   getSortedPlugins(hookName: keyof Plugin): Plugin[]
   getSortedPluginHooks<K extends keyof Plugin>(hookName: K): NonNullable<HookHandler<Plugin[K]>>[]
 }
@@ -412,7 +478,6 @@ export interface PluginHookUtils {
 type Override<Left, Right> = Omit<Left, keyof Right> & Right
 
 /**
- * TODO
  */
 export type ResolvedConfig = Override<UserConfig, InternalConfig & PluginHookUtils>
 
@@ -480,7 +545,7 @@ export type UserConfigExport =
 
 const debug = createDebugger('vite:config')
 
-const promisifiedRealpath = promisify(fs.realpath)
+const promisifiedRealpath = util.promisify(fs.realpath)
 
 export async function resolveConfig(
   inlineConfig: InlineConfig,
@@ -642,7 +707,6 @@ export async function resolveConfig(
     : resolveBaseUrl(config.base, isBuild, logger) ?? '/'
 
   /**
-   * TODO
    */
   const resolvedBuildOptions = resolveBuildOptions(config.build, logger, resolvedRoot)
 
@@ -799,8 +863,8 @@ export async function resolveConfig(
       hmrPartialAccept: false,
       ...config.experimental,
     },
-    getSortedPlugins: undefined as any,
-    getSortedPluginHooks: undefined as any,
+    getSortedPlugins: () => [],
+    getSortedPluginHooks: () => [],
   }
 
   const resolved: ResolvedConfig = {
@@ -827,7 +891,7 @@ export async function loadConfigFromFile(
 
   const getTime = () => `${(performance.now() - start).toFixed(2)}ms`
 
-  let resolvedPath = configFile ? path.resolve(configFile) : findConfigFile(configRoot)
+  const resolvedPath = configFile ? path.resolve(configFile) : findConfigFile(configRoot)
 
   if (!resolvedPath) {
     debug?.('no config file found.')
@@ -845,7 +909,9 @@ export async function loadConfigFromFile(
     try {
       const pkg = lookupFile(configRoot, ['package.json'])
       isESM = !!pkg && JSON.parse(fs.readFileSync(pkg, 'utf-8')).type === 'module'
-    } catch {}
+    } catch {
+      /* noop */
+    }
   }
 
   try {
@@ -971,7 +1037,9 @@ async function bundleConfigFile(fileName: string, isESM = false): Promise<Bundle
 
                 try {
                   canResolveWithImport = !!resolveByViteResolver(id, importer, false)
-                } catch {}
+                } catch {
+                  /* noop */
+                }
 
                 if (canResolveWithImport) {
                   throw new Error(
@@ -985,7 +1053,7 @@ async function bundleConfigFile(fileName: string, isESM = false): Promise<Bundle
             }
 
             if (filePath && isImport) {
-              filePath = pathToFileURL(filePath).href
+              filePath = url.pathToFileURL(filePath).href
             }
 
             if (filePath && !isImport && isESMFile(filePath)) {
@@ -1012,7 +1080,9 @@ async function bundleConfigFile(fileName: string, isESM = false): Promise<Bundle
             const banner =
               `const ${dirnameVarName} = ${JSON.stringify(path.dirname(args.path))};` +
               `const ${filenameVarName} = ${JSON.stringify(args.path)};` +
-              `const ${importMetaUrlVarName} = ${JSON.stringify(pathToFileURL(args.path).href)};`
+              `const ${importMetaUrlVarName} = ${JSON.stringify(
+                url.pathToFileURL(args.path).href,
+              )};`
 
             return {
               loader: args.path.endsWith('ts') ? 'ts' : 'js',
@@ -1035,7 +1105,7 @@ function findConfigFile(root: string, configFiles = DEFAULT_CONFIG_FILES): strin
 }
 
 interface NodeModuleWithCompile extends NodeModule {
-  _compile(code: string, filename: string): any
+  _compile(code: string, filename: string): unknown
 }
 
 const _require = createRequire(import.meta.url)
@@ -1053,7 +1123,7 @@ async function loadConfigFromBundledFile(
 
     const fileNameTmp = `${fileBase}.mjs`
 
-    const fileUrl = `${pathToFileURL(fileBase)}.mjs`
+    const fileUrl = `${url.pathToFileURL(fileBase)}.mjs`
 
     fs.writeFileSync(fileNameTmp, bundledCode)
 

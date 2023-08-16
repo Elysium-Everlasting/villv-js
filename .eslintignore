@@ -7,3 +7,8 @@ node_modules/
 
 ## Vitest coverage output. https://vitest.dev/guide/coverage.html
 coverage/
+
+## Build outputs.
+
+### Specified by tsconfig.json
+dist/
