@@ -40,13 +40,13 @@ import {
   normalizePath,
   safeRealpathSync,
   tryStatSync,
-  type DependencyOptimizationConfig,
   normalizeSlash,
   getNpmPackageName,
 } from '../utils.js'
 import type { PartialResolvedId } from 'rollup'
 import type { Plugin } from '../plugin.js'
 import { optimizedDependencyInfoFromFile, type DependencyOptimizer } from '../optimizer/index.js'
+import type { SSROptions } from '../ssr/index.js'
 
 const startsWithWordCharREGEX = /^\w/
 
@@ -97,9 +97,8 @@ export interface InternalResolveOptions extends Required<ResolveOptions> {
   isProduction: boolean
 
   /**
-   * TODO
    */
-  ssrConfig?: any // SSROptions
+  ssrConfig?: SSROptions
 
   packageCache?: PackageCache
 
@@ -133,9 +132,8 @@ export interface InternalResolveOptions extends Required<ResolveOptions> {
 
   /**
    * Resolve using esbuild deps optimization
-   * TODO
    */
-  getDepsOptimizer?: any // (ssr: boolean) => DepsOptimizer | undefined
+  getDepsOptimizer?: (ssr: boolean) => DependencyOptimizer | undefined
 
   shouldExternalize?: (id: string, importer?: string) => boolean | undefined
 
@@ -172,7 +170,7 @@ export function tryNodeResolve(
   importer: string | null | undefined,
   options: InternalResolveOptionsWithOverrideConditions,
   targetWeb: boolean,
-  depsOptimizer?: any, // DepsOptimizer,
+  depsOptimizer?: DependencyOptimizer,
   ssr: boolean = false,
   externalize?: boolean,
   allowLinkedExternal: boolean = true,
@@ -306,8 +304,8 @@ export function tryNodeResolve(
   let include = depsOptimizer?.options.include
   if (options.ssrOptimizeCheck) {
     // we don't have the depsOptimizer
-    exclude = options.ssrConfig?.optimizeDeps?.exclude
-    include = options.ssrConfig?.optimizeDeps?.include
+    exclude = options.ssrConfig?.optimizeDependencies?.exclude
+    include = options.ssrConfig?.optimizeDependencies?.include
   }
 
   const skipOptimization =
@@ -721,7 +719,9 @@ function tryCleanFsResolve(
           return resolvePackageEntry(dirPath, pkg, targetWeb, options)
         }
       } catch (e) {
-        if ((e as any).code !== 'ENOENT') throw e
+        if (e && typeof e === 'object' && 'code' in e && e.code !== 'ENOENT') {
+          throw e
+        }
       }
     }
 
@@ -1042,6 +1042,8 @@ export default new Proxy({}, {
           return `throw new Error(\`Could not resolve "${peerDep}" imported by "${parentDep}". Is it installed?\`)`
         }
       }
+
+      return
     },
   }
 }
@@ -1053,7 +1055,7 @@ function ensureVersionQuery(
   resolved: string,
   id: string,
   options: InternalResolveOptions,
-  dependencyOptimizer: DependencyOptimizer,
+  dependencyOptimizer?: DependencyOptimizer,
 ) {
   if (
     !options.isBuild &&

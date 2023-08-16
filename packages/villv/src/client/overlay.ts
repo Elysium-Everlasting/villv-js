@@ -1,4 +1,4 @@
-import type { ErrorInfo, ErrorPayload } from '../types/hmrPayload.js'
+import type * as hmr from '../types/hmrPayload.js'
 
 /**
  * Injected by esbuild.
@@ -165,10 +165,10 @@ export class ErrorOverlay extends currentThis.HTMLElement {
   closeOnEsc: (e: KeyboardEvent) => void
 
   /**
-   * @param err The error information from the {@link ErrorPayload}
+   * @param err The error information from the {@link hmr.ErrorPayload}
    * @param [linkFiles=true] Whether to link the file paths in the error message to the source code.
    */
-  constructor(err: ErrorInfo, linkFiles = true) {
+  constructor(err: hmr.ErrorInfo, linkFiles = true) {
     super()
     this.root = this.attachShadow({ mode: 'open' })
     this.root.innerHTML = template

@@ -5,7 +5,7 @@
  */
 
 import type { UserConfig, ConfigEnv, ResolvedConfig, Command } from './config.js'
-import type { Plugin as RollupPlugin, PluginHooks, ObjectHook } from 'rollup'
+import type * as Rollup from 'rollup'
 
 /**
  * Vite plugins extend Rollup's plugin API with some additional Vite-specific options.
@@ -18,7 +18,7 @@ import type { Plugin as RollupPlugin, PluginHooks, ObjectHook } from 'rollup'
  *
  * ABy default, the plugins are run during __both__ development and build phases.
  * When a plugin is applied during development, it will only run __non output plugin hooks__
- * See Rollup's type definition of {@link PluginHooks} for more details.
+ * See Rollup's type definition of {@link Rollup.PluginHooks} for more details.
  *
  * You can think of the development server as only running `const bundle = rollup.rollup()`,
  * but never calling `bundle.generate()` or `bundle.write()`.
@@ -30,7 +30,7 @@ import type { Plugin as RollupPlugin, PluginHooks, ObjectHook } from 'rollup'
  * If a plugin should only be applied exclusively for either phase,
  * a function format config file can be used to conditionally determine the plugins to use.
  */
-export interface Plugin extends RollupPlugin {
+export interface Plugin extends Rollup.Plugin {
   /**
    * Enforce plugin invocation tier similar to webpack loaders.
    *
@@ -60,7 +60,7 @@ export interface Plugin extends RollupPlugin {
    *
    * TODO
    */
-  config?: ObjectHook<
+  config?: Rollup.ObjectHook<
     (
       this: void,
       config: UserConfig,
@@ -73,7 +73,7 @@ export interface Plugin extends RollupPlugin {
    *
    * TODO
    */
-  configResolved?: ObjectHook<(this: void, config: ResolvedConfig) => void | Promise<void>>
+  configResolved?: Rollup.ObjectHook<(this: void, config: ResolvedConfig) => void | Promise<void>>
 
   /**
    * Configure the development server.
@@ -87,37 +87,37 @@ export interface Plugin extends RollupPlugin {
    *
    * TODO
    */
-  configureServer?: ObjectHook<any>
+  configureServer?: Rollup.ObjectHook<unknown>
 
   /**
    * TODO
    */
-  configurePreviewServer?: ObjectHook<any>
+  configurePreviewServer?: Rollup.ObjectHook<unknown>
 
   /**
    * TODO
    */
-  transformIndexHtml?: ObjectHook<any>
+  transformIndexHtml?: Rollup.ObjectHook<unknown>
 
   /**
    * TODO
    */
-  handleHotUpdate?: ObjectHook<any>
+  handleHotUpdate?: Rollup.ObjectHook<unknown>
 
   /**
    * TODO
    */
-  resolveId?: ObjectHook<any>
+  resolveId?: Rollup.ObjectHook<unknown>
 
   /**
    * TODO
    */
-  load?: ObjectHook<any>
+  load?: Rollup.ObjectHook<unknown>
 
   /**
    * TODO
    */
-  transform?: ObjectHook<any>
+  transform?: Rollup.ObjectHook<unknown>
 }
 
 export type PluginOrder = 'pre' | 'post'

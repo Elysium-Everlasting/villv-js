@@ -16,6 +16,16 @@ const config = {
     'plugin:@typescript-eslint/recommended',
     'plugin:@typescript-eslint/eslint-recommended',
   ],
+  rules: {
+    '@typescript-eslint/no-unused-vars': [
+      'error',
+      {
+        argsIgnorePattern: '^_',
+        varsIgnorePattern: '^_',
+        caughtErrorsIgnorePattern: '^_',
+      },
+    ],
+  },
   ignorePatterns: ['*.config.*', '*.cjs'],
 }
 

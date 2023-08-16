@@ -82,19 +82,20 @@ const enableOverlay = __HMR_ENABLE_OVERLAY__
  */
 const messageBuffer: string[] = []
 
+/* eslint-disable-next-line @typescript-eslint/no-explicit-any */
 const customListeners = new Map<string, ((data: any) => void)[]>()
 
 const outdatedLinkTags = new WeakSet<HTMLLinkElement>()
 
-const disposeMap = new Map<string, (data: any) => void | Promise<void>>()
+const disposeMap = new Map<string, (data: unknown) => void | Promise<void>>()
 
-const pruneMap = new Map<string, (data: any) => void | Promise<void>>()
+const pruneMap = new Map<string, (data: unknown) => void | Promise<void>>()
 
 const hotModulesMap = new Map<string, HotModule>()
 
 const ctxToListenersMap = new Map<string, typeof customListeners>()
 
-const dataMap = new Map<string, any>()
+const dataMap = new Map<string, unknown>()
 
 let pending = false
 
@@ -440,7 +441,7 @@ async function waitForSuccessfulPing(protocol: string, hostAndPath: string, inte
 
   await wait(interval)
 
-  while (true) {
+  for (;;) {
     if (document.visibilityState === 'visible') {
       if (await ping()) {
         break
@@ -539,11 +540,13 @@ export function createHotContext(ownerPath: string): ViteHotContext {
       return dataMap.get(ownerPath)
     },
 
-    accept(deps?: any, callback?: any) {
-      if (!deps || typeof deps === 'function') {
+    accept(deps?: unknown, callback?: HotCallback['fn']) {
+      if (!deps) {
+        acceptDeps([ownerPath], () => deps)
+      } else if (typeof deps === 'function') {
         acceptDeps([ownerPath], ([mod]) => deps?.(mod))
       } else if (typeof deps === 'string') {
-        acceptDeps([deps], ([mod]) => callback?.(mod))
+        acceptDeps([deps], ([mod]) => callback?.([mod]))
       } else if (Array.isArray(deps)) {
         acceptDeps(deps, callback)
       } else {

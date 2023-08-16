@@ -1,6 +1,6 @@
 import type { InferCustomEventPayload, MaybeCustomEventMapKey } from './customEvent.js'
 
-export type ModuleNamespace = Record<string, any> & {
+export type ModuleNamespace = Record<string, unknown> & {
   /**
    * What's is this?
    */
@@ -11,7 +11,7 @@ export type ModuleNamespace = Record<string, any> & {
  * Why isn't this a class?
  */
 export interface ViteHotContext {
-  readonly data: any
+  readonly data: unknown
 
   accept(): void
   accept(cb: (mod?: ModuleNamespace) => void): void
@@ -25,12 +25,12 @@ export interface ViteHotContext {
   /**
    * Idk what this does.
    */
-  dispose(cb: (data: any) => void): void
+  dispose(cb: (data: unknown) => void): void
 
   /**
    * Idk what this does.
    */
-  prune(cb: (data: any) => void): void
+  prune(cb: (data: unknown) => void): void
 
   /**
    * Invalidates a module? Why is it only a string?

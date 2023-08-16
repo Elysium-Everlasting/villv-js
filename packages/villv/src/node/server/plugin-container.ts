@@ -49,7 +49,7 @@ import {
 } from '../utils.js'
 import { createPluginHookUtils } from '../plugins/index.js'
 import { FS_PREFIX } from '../constants.js'
-import type { RawSourceMap } from '@ampproject/remapping'
+import type { RawSourceMap, SourceMapInput } from '@ampproject/remapping'
 
 function cleanStack(stack: string) {
   return stack
@@ -196,9 +196,13 @@ export interface LoadOptions {
 
 export let parser = acorn.Parser
 
+interface ModuleGraph {
+  hello: ''
+}
+
 export async function createPluginContainer(
   config: ResolvedConfig,
-  moduleGraph?: any, // ModuleGraph,
+  moduleGraph?: ModuleGraph,
   watcher?: FSWatcher,
 ): Promise<PluginContainer> {
   const {
@@ -210,7 +214,7 @@ export async function createPluginContainer(
 
   const { getSortedPluginHooks, getSortedPlugins } = createPluginHookUtils(plugins)
 
-  const processesing = new Set<Promise<any>>()
+  const processesing = new Set<Promise<unknown>>()
 
   const seenResolves: Record<string, true | undefined> = {}
 
@@ -242,7 +246,7 @@ export async function createPluginContainer(
   }
 
   function handleHookPromise<T>(maybePromise: undefined | T | Promise<T>) {
-    if (!(maybePromise as any)?.then) {
+    if (!(maybePromise instanceof Promise)) {
       return maybePromise
     }
 
@@ -263,7 +267,9 @@ export async function createPluginContainer(
     debug: noop,
     info: noop,
     warn: noop,
-    error: noop as any,
+    error: () => {
+      throw new Error()
+    },
   }
 
   async function getOptions() {
@@ -278,7 +284,7 @@ export async function createPluginContainer(
     }
 
     if (options.acornInjectPlugins) {
-      parser = acorn.Parser.extend(...(toArray(options.acornInjectPlugins) as any))
+      parser = acorn.Parser.extend(...toArray(options.acornInjectPlugins))
     }
 
     return {
@@ -304,6 +310,7 @@ export async function createPluginContainer(
         continue
       }
 
+      /* eslint-disable-next-line @typescript-eslint/ban-types */
       const handler: Function = 'handler' in hook ? hook.handler : hook
 
       if ((hook as { sequential?: boolean }).sequential) {
@@ -320,9 +327,9 @@ export async function createPluginContainer(
   // throw when an unsupported ModuleInfo property is accessed,
   // so that incompatible plugins fail in a non-cryptic way.
   const ModuleInfoProxy: ProxyHandler<ModuleInfo> = {
-    get(info: any, key: string) {
+    get(info, key) {
       if (key in info) {
-        return info[key]
+        return info[key as keyof ModuleInfo]
       }
 
       // Don't throw an error when returning from an async function
@@ -330,7 +337,7 @@ export async function createPluginContainer(
         return undefined
       }
 
-      throw Error(`[vite] The "${key}" property of ModuleInfo is not supported.`)
+      throw Error(`[vite] The "${key.toString()}" property of ModuleInfo is not supported.`)
     },
   }
 
@@ -377,7 +384,7 @@ export async function createPluginContainer(
       this._activePlugin = initialPlugin || null
     }
 
-    parse(code: string, opts: any = {}) {
+    parse(code: string, opts = {}) {
       return parser.parse(code, {
         sourceType: 'module',
         ecmaVersion: 'latest',
@@ -521,7 +528,8 @@ export async function createPluginContainer(
       err.pluginCode = ctx._activeCode
 
       // some rollup plugins, e.g. json, sets err.position instead of err.pos
-      const pos = position ?? err.pos ?? (err as any).position
+      const pos =
+        position ?? err.pos ?? ('position' in err ? (err.position as typeof position) : undefined)
 
       if (pos != null) {
         let errLocation
@@ -551,16 +559,18 @@ export async function createPluginContainer(
 
             try {
               code = fs.readFileSync(err.loc.file, 'utf-8')
-            } catch {}
+            } catch {
+              /* noop */
+            }
           }
 
           err.frame = generateCodeFrame(code, err.loc)
         }
-      } else if ((err as any).line && (err as any).column) {
+      } else if (err.line && err.column) {
         err.loc = {
           file: err.id,
-          line: (err as any).line,
-          column: (err as any).column,
+          line: err.line,
+          column: err.column,
         }
 
         err.frame ||= generateCodeFrame(err.id!, err.loc)
@@ -574,7 +584,7 @@ export async function createPluginContainer(
         const rawSourceMap = ctx._getCombinedSourcemap()
 
         if (rawSourceMap) {
-          const traced = new TraceMap(rawSourceMap as any)
+          const traced = new TraceMap(rawSourceMap as SourceMapInput)
 
           const { source, line, column } = originalPositionFor(traced, {
             line: Number(err.loc.line),
@@ -596,7 +606,9 @@ export async function createPluginContainer(
           if (!code) {
             try {
               code = fs.readFileSync(err.loc.file, 'utf-8')
-            } catch {}
+            } catch {
+              /* noop */
+            }
           }
         }
         if (code) {
@@ -659,7 +671,7 @@ export async function createPluginContainer(
         const handler = 'handler' in plugin.resolveId ? plugin.resolveId.handler : plugin.resolveId
 
         const result = await handleHookPromise(
-          handler.call(ctx as any, rawId, importer, {
+          handler.call(ctx, rawId, importer, {
             assertions: options?.assertions ?? {},
             custom: options?.custom,
             isEntry: !!options?.isEntry,
@@ -722,7 +734,7 @@ export async function createPluginContainer(
         ctx._activePlugin = plugin
 
         const handler = 'handler' in plugin.load ? plugin.load.handler : plugin.load
-        const result = await handleHookPromise(handler.call(ctx as any, id, { ssr }))
+        const result = await handleHookPromise(handler.call(ctx, id, { ssr }))
 
         if (result != null) {
           if (isObject(result)) {
@@ -761,7 +773,7 @@ export async function createPluginContainer(
         const handler = 'handler' in plugin.transform ? plugin.transform.handler : plugin.transform
 
         try {
-          result = await handleHookPromise(handler.call(ctx as any, code, id, { ssr }))
+          result = await handleHookPromise(handler.call(ctx, code, id, { ssr }))
         } catch (e) {
           ctx.error(e as RollupError)
         }
@@ -855,6 +867,7 @@ export async function createPluginContainer(
       }
 
       let combinedMap = this.combinedMap
+
       for (let m of this.sourcemapChain) {
         if (typeof m === 'string') {
           m = JSON.parse(m)
@@ -891,6 +904,7 @@ export async function createPluginContainer(
         this.combinedMap = combinedMap
         this.sourcemapChain.length = 0
       }
+
       return this.combinedMap
     }
 
@@ -906,8 +920,14 @@ const noop = () => {}
 
 export const ERR_CLOSED_SERVER = 'ERR_CLOSED_SERVER'
 
+interface ExtendedError extends Error {
+  code?: string
+}
+
 export function throwClosedServerError(): never {
-  const err: any = new Error('The server is being restarted or closed. Request is outdated')
+  const err: ExtendedError = new Error(
+    'The server is being restarted or closed. Request is outdated',
+  )
   err.code = ERR_CLOSED_SERVER
 
   // This error will be caught by the transform middleware that will

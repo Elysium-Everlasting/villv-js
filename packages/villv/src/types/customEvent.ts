@@ -38,7 +38,7 @@ export interface InvalidatePayload {
  * i.e. used in function signature for adding event listener.
  */
 export type InferCustomEventPayload<T extends MaybeCustomEventMapKey> =
-  T extends keyof CustomEventMap ? CustomEventMap[T] : any
+  T extends keyof CustomEventMap ? CustomEventMap[T] : unknown
 
 export type MaybeCustomEventMapKey = keyof CustomEventMap | AutocompleteString
 

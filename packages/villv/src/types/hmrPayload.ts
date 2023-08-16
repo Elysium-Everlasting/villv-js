@@ -24,7 +24,7 @@ export interface ConnectedPayload {
 export interface CustomPayload {
   type: 'custom'
   event: string
-  data?: any
+  data?: unknown
 }
 
 /**
@@ -67,7 +67,7 @@ export interface UpdatePayload {
  * Information about an error.
  */
 export interface ErrorInfo {
-  [name: string]: any
+  [name: string]: unknown
   message: string
   stack: string
   id?: string

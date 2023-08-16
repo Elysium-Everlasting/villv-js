@@ -7,7 +7,9 @@ let pnp: typeof import('pnpapi') | undefined
 if (process.versions.pnp) {
   try {
     pnp = createRequire(import.meta.url)('pnpapi')
-  } catch {}
+  } catch {
+    /* noop */
+  }
 }
 
 export type PackageCache = Map<string, PackageData>
@@ -61,9 +63,11 @@ export interface PackageJson {
   main: string
   module: string
   browser: string | Record<string, string | false>
-  exports: string | Record<string, any> | string[]
-  imports: Record<string, any>
+  exports: string | Record<string, unknown> | string[]
+  imports: Record<string, unknown>
   dependencies: Record<string, string>
+
+  /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
   [field: string]: any
 }
 
@@ -95,7 +99,9 @@ export function findNearestPackageData(
       }
 
       return packageData
-    } catch {}
+    } catch {
+      /* noop */
+    }
 
     const nextCurrentDirectory = path.dirname(currentDirectory)
 
@@ -284,7 +290,9 @@ export function resolvePackageData(
 
         return pkgData
       }
-    } catch {}
+    } catch {
+      /* noop */
+    }
 
     const nextBasedir = path.dirname(basedir)
     if (nextBasedir === basedir) break

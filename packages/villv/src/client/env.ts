@@ -3,7 +3,7 @@
 //-----------------------------------------------------------------------------------
 declare const __MODE__: string
 
-declare const __DEFINES__: Record<string, any>
+declare const __DEFINES__: Record<string, unknown>
 
 const context =
   typeof globalThis !== 'undefined'

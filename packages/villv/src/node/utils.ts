@@ -229,7 +229,7 @@ export function createDebugger(
     return
   }
 
-  return (...args: [string, ...any[]]) => {
+  return (...args: [string, ...(string | unknown[])[]]) => {
     if (!VITE_DEBUG_FILTER || args.some((arg) => arg?.includes?.(VITE_DEBUG_FILTER))) {
       log(...args)
     }
@@ -431,6 +431,8 @@ export async function asyncReplace(
     rewritten += await replacer(match)
     remaining = remaining.slice(match.index + match[0].length)
   }
+
+  return rewritten
 }
 
 export function timeFrom(start: number, subtract = 0): string {
@@ -462,7 +464,7 @@ export function formatUrl(url: string, root: string): string {
   }
 }
 
-export function isObject(value: unknown): value is Record<PropertyKey, any> {
+export function isObject(value: unknown): value is Record<PropertyKey, unknown> {
   return Object.prototype.toString.call(value) === '[object Object]'
 }
 
@@ -843,7 +845,7 @@ interface ImageCandidate {
 
 const escapedSpaceCharactersRegex = /( |\\t|\\n|\\f|\\r)+/g
 
-const imageSetUrlRegex = /^(?:[\w\-]+\(.*?\)|'.*?'|".*?"|\S*)/
+const imageSetUrlRegex = /^(?:[\w-]+\(.*?\)|'.*?'|".*?"|\S*)/
 
 function reduceSrcset(srcSet: ImageCandidate[]) {
   return srcSet.reduce((prev, { url, descriptor = '' }, index) => {
@@ -1142,7 +1144,7 @@ export const dynamicImport = usingDynamicImport
   : _require
 
 export function parseRequest(id: string): Record<string, string> | null {
-  const [_, search] = id.split(requestQuerySplitRegex, 2)
+  const [, search] = id.split(requestQuerySplitRegex, 2)
 
   if (!search) {
     return null
@@ -1183,15 +1185,15 @@ export function removeComments(raw: string): string {
   return raw.replace(multilineCommentsRegex, '').replace(singlelineCommentsRegex, '')
 }
 
-export function mergeConfigRecursively<
-  Defaults extends Record<PropertyKey, any>,
-  Overrides extends Record<PropertyKey, any>,
->(
-  defaults: Defaults extends Function ? never : Defaults,
-  overrides: Overrides extends Function ? never : Overrides,
+/* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+type AnyRecord = Record<PropertyKey, any>
+
+export function mergeConfigRecursively<Defaults extends AnyRecord, Overrides extends AnyRecord>(
+  defaults: Defaults extends Fn ? never : Defaults,
+  overrides: Overrides extends Fn ? never : Overrides,
   rootPath: string,
 ) {
-  const merged: Record<PropertyKey, any> = { ...defaults }
+  const merged: AnyRecord = { ...defaults }
 
   Object.entries(overrides).forEach(([key, value]) => {
     if (value == null) {
@@ -1236,12 +1238,17 @@ export function mergeConfigRecursively<
   return merged
 }
 
+/**
+ * An ESLint accepted function type.
+ */
+type Fn = (...args: unknown[]) => unknown
+
 export function mergeConfig<
-  Defaults extends Record<PropertyKey, any>,
-  Overrides extends Record<PropertyKey, any>,
+  Defaults extends Record<PropertyKey, unknown>,
+  Overrides extends Record<PropertyKey, unknown>,
 >(
-  defaults: Defaults extends Function ? never : Defaults,
-  overrides: Overrides extends Function ? never : Overrides,
+  defaults: Defaults extends Fn ? never : Defaults,
+  overrides: Overrides extends Fn ? never : Overrides,
   isRoot = true,
 ): Defaults & Overrides {
   if (typeof defaults === 'function' || typeof overrides === 'function') {
@@ -1318,8 +1325,8 @@ export async function asyncFlatten<T>(initialArray: T[]): Promise<T[]> {
   let flattenedArray: typeof initialArray
 
   do {
-    flattenedArray = await Promise.all(initialArray).then((array) => array.flat(Infinity) as any)
-  } while (flattenedArray.some((item: any) => item?.then))
+    flattenedArray = await Promise.all(initialArray).then((array) => array.flat(Infinity) as T[])
+  } while (flattenedArray.some((item) => (item instanceof Promise ? item.then : item)))
 
   return flattenedArray
 }
@@ -1400,7 +1407,7 @@ export function stripBase(path: string, base: string): string {
   return path.startsWith(devBase) ? path.slice(devBase.length) : path
 }
 
-export function evalValue<T = any>(rawValue: string): T {
+export function evalValue<T = unknown>(rawValue: string): T {
   const fn = new Function(`
     var console, exports, global, module, process, require
     return (\n${rawValue}\n)

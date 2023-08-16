@@ -18,7 +18,7 @@ export interface DependencyOptimizer {
 
   getOptimizedDepId: (dependencyInfo: OptimizedDependencyInfo) => string
 
-  delayDepsOptimizerUntil: (id: string, done: () => Promise<any>) => void
+  delayDepsOptimizerUntil: (id: string, done: () => Promise<unknown>) => void
 
   registerWorkersSource: (id: string) => void
 

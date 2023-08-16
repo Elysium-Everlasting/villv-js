@@ -17,7 +17,7 @@ export interface CSSOptions {
   /**
    * Idk.
    */
-  preprocessorOptions?: Record<string, any>
+  preprocessorOptions?: Record<string, unknown>
 
   /**
    * Options passed to postcss.
