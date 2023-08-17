@@ -1,7 +1,7 @@
 {
   "name": "@villv.js/documentation",
   "version": "0.0.1",
-  "description": "villv JS documentation",
+  "description": "villv.js documentation",
   "private": true,
   "license": "MIT",
   "homepage": "https://github.com/Elysium-Everlasting/villv.js",
@@ -19,7 +19,7 @@
     "directory": "documentation"
   },
   "bugs": {
-    "url": "https://github.com/ap0nia/vite/issues"
+    "url": "https://github.com/Elysium-Everlasting/villv.js/issues"
   },
   "type": "module",
   "scripts": {
