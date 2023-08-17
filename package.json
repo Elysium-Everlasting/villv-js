@@ -4,7 +4,7 @@
   "description": "monorepo for villv.js - next generation frontend tooling",
   "private": true,
   "license": "MIT",
-  "homepage": "https://github.com/Elysium-Everlasting/villv.js",
+  "homepage": "https://elysium-everlasting.github.io/villv.js",
   "funding": "https://github.com/Elysium-Everlasting/villv.js",
   "contributors": [
     {
