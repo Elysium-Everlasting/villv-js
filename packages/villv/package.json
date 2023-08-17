@@ -34,14 +34,6 @@
   "exports": {},
   "files": [],
   "scripts": {},
-  "publishConfig": {
-    "access": "public"
-  },
-  "packageManager": "pnpm@8.6.12",
-  "engines": {
-    "pnpm": "^8.0.0",
-    "node": ">=18"
-  },
   "dependencies": {
     "@ampproject/remapping": "^2.2.1",
     "@jridgewell/trace-mapping": "^0.3.19",
@@ -71,5 +63,13 @@
     "@types/http-proxy": "^1.17.11",
     "@types/pnpapi": "^0.0.2",
     "postcss": "^8.4.27"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "packageManager": "pnpm@8.6.12",
+  "engines": {
+    "pnpm": "^8.0.0",
+    "node": ">=18"
   }
 }
